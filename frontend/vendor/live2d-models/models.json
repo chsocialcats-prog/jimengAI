@@ -1,0 +1,37 @@
+{
+  "source": "https://github.com/zenghongtu/live2d-model-assets",
+  "sourceIndex": "model.index",
+  "runtime": "Cubism 2",
+  "models": [
+    {
+      "name": "Haru",
+      "paths": ["/vendor/live2d-models/moc/haru01/haru01.model.json"],
+      "message": "Haru 已在本地待命～"
+    },
+    {
+      "name": "Izumi",
+      "paths": ["/vendor/live2d-models/moc/izumi/izumi.model.json"],
+      "message": "Izumi 来和你打招呼啦～"
+    },
+    {
+      "name": "Tia",
+      "paths": ["/vendor/live2d-models/moc/tia/tia.model.json"],
+      "message": "Tia 已切换到本地模型～"
+    },
+    {
+      "name": "Unity-chan",
+      "paths": ["/vendor/live2d-models/moc/unitychan/unitychan.model.json"],
+      "message": "Unity-chan 也可以离线陪伴你～"
+    },
+    {
+      "name": "Hijiki",
+      "paths": ["/vendor/live2d-models/moc/hijiki/hijiki.model.json"],
+      "message": "Hijiki 正在本地加载～"
+    },
+    {
+      "name": "Tororo",
+      "paths": ["/vendor/live2d-models/moc/tororo/tororo.model.json"],
+      "message": "Tororo 来啦～"
+    }
+  ]
+}

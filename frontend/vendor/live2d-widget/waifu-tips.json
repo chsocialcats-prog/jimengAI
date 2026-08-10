@@ -1,0 +1,21 @@
+{
+  "mouseover": [],
+  "click": [],
+  "seasons": [],
+  "time": [],
+  "message": {
+    "default": ["本地 Live2D 已就绪～"],
+    "welcome": "欢迎来到 AI 对话冒险。",
+    "referrer": "感谢从 $1 来到这里。",
+    "console": "Live2D Widget 正在本地运行。",
+    "copy": "复制成功。",
+    "visibilitychange": "欢迎回来～",
+    "changeSuccess": "模型已切换。",
+    "changeFail": "当前模型没有可切换的外观。",
+    "photo": "已生成模型截图。",
+    "hitokoto": "",
+    "goodbye": "下次见～",
+    "hoverBody": ["你发现我啦～"],
+    "tapBody": ["轻一点嘛～"]
+  }
+}
