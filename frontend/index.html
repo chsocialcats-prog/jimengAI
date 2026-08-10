@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>AI 对话冒险平台</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#/" aria-label="返回作品库">
+        <span class="brand-mark" data-icon="compass"></span>
+        <span class="brand-text">AI 对话冒险</span>
+      </a>
+      <nav class="nav-links" aria-label="主导航">
+        <a href="#/" data-nav="library" data-icon="book">作品库</a>
+        <a href="#/creator" data-nav="creator" data-icon="pen">创作台</a>
+        <a href="#/cards" data-nav="cards" data-icon="users">角色卡</a>
+        <a href="#/settings" data-nav="settings" data-icon="settings">设置</a>
+      </nav>
+      <div class="top-actions">
+        <span class="mode-badge" id="mode-badge" title="当前数据模式">检测中</span>
+        <button class="icon-btn" id="theme-toggle" type="button" aria-label="切换明亮模式" data-icon="moon"></button>
+      </div>
+    </header>
+    <main id="app" tabindex="-1"></main>
+  </div>
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+  <div id="modal-root"></div>
+  <noscript>本平台需要启用 JavaScript 才能使用。</noscript>
+  <script type="module" src="js/main.js?v=options-2"></script>
+</body>
+</html>

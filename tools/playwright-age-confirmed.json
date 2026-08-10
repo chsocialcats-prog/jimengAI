@@ -1,0 +1,18 @@
+{
+  "cookies": [],
+  "origins": [
+    {
+      "origin": "http://127.0.0.1:8000",
+      "localStorage": [
+        {
+          "name": "adventure_age_confirmed",
+          "value": "1"
+        },
+        {
+          "name": "adventure_theme",
+          "value": "dark"
+        }
+      ]
+    }
+  ]
+}

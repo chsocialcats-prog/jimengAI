@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.superpowers/
+node_modules/
+.env
+.env.*
+!.env.example
+data/app.db
+data/app.db-journal
+data/app.db-wal
+data/app.db-shm
