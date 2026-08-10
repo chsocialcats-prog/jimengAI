@@ -2193,3 +2193,28 @@ main#app:has(.adventure-shell) .composer textarea {
     line-height: 1.68;
   }
 }
+
+/* Live2D Widget integration */
+body #waifu {
+  z-index: 2;
+}
+
+@media (max-width: 720px) {
+  body #waifu {
+    bottom: 70px !important;
+  }
+
+  body #waifu-toggle {
+    bottom: 76px !important;
+    z-index: 71 !important;
+  }
+
+  body #live2d {
+    width: min(220px, 58vw) !important;
+    height: min(220px, 58vw) !important;
+  }
+
+  body #waifu-tips {
+    width: min(220px, calc(100vw - 30px)) !important;
+  }
+}
