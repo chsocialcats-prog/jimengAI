@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """冒险引擎世界书匹配的回归测试。"""
 
+import json
 import unittest
 import threading
 from unittest.mock import patch
@@ -45,6 +46,33 @@ class StateInstructionTests(unittest.TestCase):
         self.assertIn('"attributes":{"心情":"+5"}', prompt)
         self.assertIn("每次回复末尾都用“选项：”列出 2 到 4 个可执行行动", prompt)
         self.assertIn("除纯说明、查询或玩家明确要求不改变状态外，每次有效互动都必须", prompt)
+
+    def test_prompt_limits_state_delta_to_existing_numeric_attributes(self):
+        prompt = adventure_engine.build_system_prompt(
+            None,
+            None,
+            None,
+            [],
+            {
+                "attributes": {"学业": 60, "心情": 70},
+                "items": [],
+                "money": 0,
+                "relations": {},
+                "quests": [],
+                "flags": [],
+                "characters": {"温执": {"attributes": {"心情": 50}, "flags": []}},
+            },
+            "",
+            {
+                "attributes": {"学业": 60, "心情": 70},
+                "characters": {"温执": {"心情": 50}},
+            },
+        )
+
+        self.assertIn("学业", prompt)
+        self.assertIn("温执", prompt)
+        self.assertIn("禁止新增属性", prompt)
+        self.assertIn("根据本回合剧情选择真正相关的已有属性", prompt)
 
 
 class VisibleStateDeltaFallbackTests(unittest.TestCase):
@@ -403,6 +431,32 @@ class VisibleStateDeltaFallbackTests(unittest.TestCase):
             {"characters": {"塞西莉亚": {"attributes": {"好感度": "-1"}}}},
         )
 
+    def test_default_turn_state_delta_returns_none_without_numeric_targets(self):
+        self.assertIsNone(adventure_engine.default_turn_state_delta({}, "继续"))
+        self.assertIsNone(
+            adventure_engine.default_turn_state_delta(
+                {
+                    "attributes": {"称号": "优等生"},
+                    "characters": {
+                        "温执": {
+                            "attributes": {"状态": "平静"},
+                            "flags": [],
+                        }
+                    },
+                },
+                "继续",
+            )
+        )
+
+    def test_default_turn_state_delta_uses_existing_numeric_attribute_without_creating_mood(self):
+        delta = adventure_engine.default_turn_state_delta(
+            {"attributes": {"学业": 60}},
+            "继续学习",
+        )
+
+        self.assertEqual(delta, {"attributes": {"学业": "+1"}})
+        self.assertNotIn("心情", json.dumps(delta, ensure_ascii=False))
+
     def test_stream_appends_an_automatic_notice_when_model_omits_delta(self):
         class NarrativeOnlyClient:
             def stream_chat(self, _messages):
@@ -462,6 +516,14 @@ class MemorySummaryTests(unittest.TestCase):
             "attributes": {}, "items": [], "money": 0, "relations": {},
             "quests": [], "flags": [],
         }
+        self.attribute_schema = {"attributes": {}, "characters": {}}
+        self.get_schema_patcher = patch.object(
+            adventure_engine.repositories,
+            "get_or_create_attribute_schema",
+            return_value=self.attribute_schema,
+        )
+        self.get_schema_patcher.start()
+        self.addCleanup(self.get_schema_patcher.stop)
 
     def test_build_messages_uses_saved_summary_without_writing(self):
         history = [
@@ -720,6 +782,37 @@ class MemorySummaryTests(unittest.TestCase):
         ):
             with self.subTest(expected=expected):
                 self.assertIn(expected, system_prompt)
+
+    def test_build_messages_uses_saved_attribute_schema_for_system_prompt(self):
+        history = [{"sequence": 0, "role": "user", "content": "message-0"}]
+        saved_schema = {
+            "attributes": {"学业": 60},
+            "characters": {"温执": {"信任": 10}},
+        }
+        self.get_schema_patcher.stop()
+        with patch.object(adventure_engine.repositories, "get_conversation", return_value=self.conversation), \
+             patch.object(adventure_engine.repositories, "get_state", return_value=self.state), \
+             patch.object(adventure_engine.repositories, "get_messages", return_value=history), \
+             patch.object(
+                 adventure_engine.repositories,
+                 "get_memory_summary_record",
+                 return_value={"summary": "", "covered_until_sequence": -1},
+             ), \
+             patch.object(
+                 adventure_engine.repositories,
+                 "get_or_create_attribute_schema",
+                 return_value=saved_schema,
+             ) as get_schema, \
+             patch.object(
+                 adventure_engine,
+                 "build_system_prompt",
+                 return_value="system-prompt",
+             ) as build_prompt:
+            messages = adventure_engine.build_messages(7)
+
+        self.assertEqual(messages[0]["content"], "system-prompt")
+        get_schema.assert_called_once_with(7)
+        self.assertEqual(build_prompt.call_args.args[-1], saved_schema)
 
     def test_short_history_clears_stale_summary(self):
         history = [{"sequence": 1, "role": "user", "content": "新分支的开场"}]
