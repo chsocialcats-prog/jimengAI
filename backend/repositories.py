@@ -102,6 +102,35 @@ def normalize_state(raw=None):
     }
 
 
+def normalize_attribute_schema(raw):
+    if not isinstance(raw, dict):
+        return {}
+    has_shape = "attributes" in raw or "characters" in raw
+    if not has_shape:
+        return {}
+    attributes = raw.get("attributes")
+    characters = raw.get("characters")
+    return {
+        "attributes": dict(attributes) if isinstance(attributes, dict) else {},
+        "characters": {
+            str(name): dict(profile)
+            for name, profile in (characters or {}).items()
+            if isinstance(profile, dict)
+        } if isinstance(characters, dict) else {},
+    }
+
+
+def build_attribute_schema(state):
+    return normalize_attribute_schema({
+        "attributes": state.get("attributes", {}),
+        "characters": {
+            str(name): (profile or {}).get("attributes", {})
+            for name, profile in (state.get("characters") or {}).items()
+            if isinstance(profile, dict)
+        },
+    })
+
+
 # ---------- 角色卡 ----------
 
 
@@ -649,6 +678,9 @@ def row_to_conversation(row):
         return None
     data = ConversationRecord(row)
     data["current_state"] = json_loads(data.get("current_state"), {})
+    data["attribute_schema"] = normalize_attribute_schema(
+        json_loads(data.get("attribute_schema"), {})
+    )
     card_snapshot = json_loads(data.get("card_snapshot"), {})
     data._card_snapshots_authoritative = card_snapshot == _EMPTY_CARD_SNAPSHOT_MARKER
     data["card_snapshot"] = {} if data._card_snapshots_authoritative else card_snapshot
@@ -666,6 +698,45 @@ def get_conversation(conversation_id):
     return row_to_conversation(
         fetch_one("SELECT * FROM conversations WHERE id = ?", (conversation_id,))
     )
+
+
+def get_or_create_attribute_schema(conversation_id):
+    conversation = get_conversation(conversation_id)
+    if conversation is None:
+        return None
+    existing = normalize_attribute_schema(conversation.get("attribute_schema"))
+    if existing:
+        return existing
+
+    state = normalize_state(get_state(conversation_id))
+    if not state["characters"]:
+        fallback_state = normalize_state(state)
+        fallback_state["characters"] = _initial_character_states(
+            get_conversation_cards(conversation),
+            fallback_state,
+        )
+        state = fallback_state
+    schema = build_attribute_schema(state)
+
+    with closing(connect()) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT attribute_schema FROM conversations WHERE id = ?",
+            (conversation_id,),
+        ).fetchone()
+        if row is None:
+            connection.rollback()
+            return None
+        current = normalize_attribute_schema(json_loads(row["attribute_schema"], {}))
+        if current:
+            connection.commit()
+            return current
+        connection.execute(
+            "UPDATE conversations SET attribute_schema = ? WHERE id = ?",
+            (json_dumps(schema), conversation_id),
+        )
+        connection.commit()
+    return schema
 
 
 def get_conversation_card(conversation):
@@ -782,13 +853,15 @@ def create_conversation(work_id, title):
         card_snapshot = card if card else _EMPTY_CARD_SNAPSHOT_MARKER
         initial_state = normalize_state({"attributes": work.get("player_attributes") or {}})
         initial_state["characters"] = _initial_character_states(card_snapshots, initial_state)
+        attribute_schema = build_attribute_schema(initial_state)
         onboarding = validate_onboarding(work.get("onboarding", {}))
         cursor = connection.execute(
             """
             INSERT INTO conversations (
                 work_id, card_id, worldbook_id, title, status,
-                current_state, card_snapshot, card_snapshots, onboarding_status, onboarding_config, onboarding_answers, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                current_state, attribute_schema, card_snapshot, card_snapshots,
+                onboarding_status, onboarding_config, onboarding_answers, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 work_id,
@@ -797,6 +870,7 @@ def create_conversation(work_id, title):
                 title,
                 "active",
                 json_dumps(initial_state),
+                json_dumps(attribute_schema),
                 json_dumps(card_snapshot), json_dumps(card_snapshots),
                 onboarding_status, json_dumps(onboarding), json_dumps({}),
                 now,
@@ -880,6 +954,9 @@ def create_conversation_branch(source_conversation_id, title, branch_label=""):
     card_id = card_snapshot.get("id") if isinstance(card_snapshot, dict) else None
     if card_id is None:
         card_id = source.get("card_id")
+    attribute_schema = normalize_attribute_schema(source.get("attribute_schema"))
+    if not attribute_schema:
+        attribute_schema = build_attribute_schema(state)
     now = now_str()
     with closing(connect()) as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -887,14 +964,14 @@ def create_conversation_branch(source_conversation_id, title, branch_label=""):
             """
             INSERT INTO conversations (
                 work_id, card_id, worldbook_id, title, status, current_state,
-                card_snapshot, card_snapshots, parent_conversation_id, branch_label,
+                attribute_schema, card_snapshot, card_snapshots, parent_conversation_id, branch_label,
                 onboarding_status, onboarding_config, onboarding_answers,
                 persona_corrections, memory_corrections, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 source.get("work_id"), card_id, source.get("worldbook_id"), title,
-                "active", json_dumps(state), json_dumps(card_snapshot),
+                "active", json_dumps(state), json_dumps(attribute_schema), json_dumps(card_snapshot),
                 json_dumps(card_snapshots), source_conversation_id, branch_label,
                 source.get("onboarding_status", "completed"),
                 json_dumps(source.get("onboarding_config") or {}),

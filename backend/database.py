@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     title TEXT NOT NULL DEFAULT '新的冒险',
     status TEXT NOT NULL DEFAULT 'active',
     current_state TEXT NOT NULL DEFAULT '{}',
+    attribute_schema TEXT NOT NULL DEFAULT '{}',
     card_snapshot TEXT NOT NULL DEFAULT '{}',
     card_snapshots TEXT NOT NULL DEFAULT '[]',
     parent_conversation_id INTEGER
@@ -465,6 +466,7 @@ def init_db():
             _ensure_column(connection, "conversations", "onboarding_answers", "ALTER TABLE conversations ADD COLUMN onboarding_answers TEXT NOT NULL DEFAULT '{}'")
             _ensure_column(connection, "conversations", "persona_corrections", "ALTER TABLE conversations ADD COLUMN persona_corrections TEXT NOT NULL DEFAULT '[]'")
             _ensure_column(connection, "conversations", "memory_corrections", "ALTER TABLE conversations ADD COLUMN memory_corrections TEXT NOT NULL DEFAULT '[]'")
+            _ensure_column(connection, "conversations", "attribute_schema", "ALTER TABLE conversations ADD COLUMN attribute_schema TEXT NOT NULL DEFAULT '{}'")
             _ensure_column(connection, "conversations", "card_snapshot", "ALTER TABLE conversations ADD COLUMN card_snapshot TEXT NOT NULL DEFAULT '{}'")
             _ensure_column(
                 connection,

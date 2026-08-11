@@ -112,6 +112,7 @@ class MultiRoleCardMigrationTests(unittest.TestCase):
         self.create_legacy_schema()
         self.assertNotIn("player_attributes", self.legacy_columns("works"))
         self.assertNotIn("card_snapshots", self.legacy_columns("conversations"))
+        self.assertNotIn("attribute_schema", self.legacy_columns("conversations"))
         with closing(sqlite3.connect(self.db_path)) as connection:
             self.assertIsNone(
                 connection.execute(
@@ -154,7 +155,7 @@ class MultiRoleCardMigrationTests(unittest.TestCase):
         database.init_db()
 
         self.assertTrue({"player_attributes", "onboarding", "cover_url"} <= self.legacy_columns("works"))
-        self.assertTrue({"card_snapshots", "onboarding_status"} <= self.legacy_columns("conversations"))
+        self.assertTrue({"card_snapshots", "onboarding_status", "attribute_schema"} <= self.legacy_columns("conversations"))
         self.assertEqual(
             database.fetch_all(
                 "SELECT card_id, position FROM work_cards WHERE work_id = ?", (work_ids[0],)
@@ -356,6 +357,68 @@ class MultiRoleCardMigrationTests(unittest.TestCase):
                     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'work_cards'"
                 ).fetchone()
             )
+
+    def test_get_or_create_attribute_schema_backfills_legacy_snapshot_once(self):
+        database.init_db()
+        card = repositories.create_card({
+            "name": "温柔学姐",
+            "initial_state": {"attributes": {"legacy": 1}},
+            "character_attributes": {"心情": 50, "好感度": 3},
+        })
+        work = repositories.create_work({
+            "title": "legacy schema work",
+            "card_ids": [card["id"]],
+            "player_attributes": {"学业": 60},
+        })
+        conversation = repositories.create_conversation(work["id"], "legacy schema session")
+        database.execute(
+            "UPDATE conversations SET attribute_schema = ? WHERE id = ?",
+            ("", conversation["id"]),
+        )
+        repositories.save_state(
+            conversation["id"],
+            {
+                "attributes": {"学业": 66},
+                "characters": {},
+            },
+        )
+
+        schema = repositories.get_or_create_attribute_schema(conversation["id"])
+        self.assertEqual(
+            schema,
+            {
+                "attributes": {"学业": 66},
+                "characters": {"温柔学姐": {"心情": 50, "好感度": 3}},
+            },
+        )
+        self.assertEqual(
+            database.json_loads(
+                database.fetch_one(
+                    "SELECT attribute_schema FROM conversations WHERE id = ?",
+                    (conversation["id"],),
+                )["attribute_schema"]
+            ),
+            schema,
+        )
+
+        repositories.save_state(
+            conversation["id"],
+            {
+                "attributes": {"学业": 99},
+                "characters": {"温柔学姐": {"attributes": {"心情": 88, "好感度": 10}, "flags": []}},
+            },
+        )
+        second_schema = repositories.get_or_create_attribute_schema(conversation["id"])
+        self.assertEqual(second_schema, schema)
+        self.assertEqual(
+            database.json_loads(
+                database.fetch_one(
+                    "SELECT attribute_schema FROM conversations WHERE id = ?",
+                    (conversation["id"],),
+                )["attribute_schema"]
+            ),
+            schema,
+        )
 class MultiRoleCardWorkApiTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
@@ -510,6 +573,16 @@ class MultiRoleCardConversationTests(unittest.TestCase):
         self.assertEqual(conversation["card_id"], first["id"])
         self.assertEqual(repositories.get_state(conversation["id"])["attributes"], {"stamina": 80})
         self.assertEqual(conversation["current_state"]["attributes"], {"stamina": 80})
+        self.assertEqual(
+            conversation["attribute_schema"],
+            {
+                "attributes": {"stamina": 80},
+                "characters": {
+                    "first card": {"mood": 50, "心情": 50, "好感度": 0},
+                    "second card": {"mood": 50, "心情": 50, "好感度": 0},
+                },
+            },
+        )
 
         repositories.update_card(first["id"], {"persona": "edited live persona"})
         self.assertEqual(
@@ -558,6 +631,10 @@ class MultiRoleCardConversationTests(unittest.TestCase):
         self.assertEqual(conversation["card_snapshot"], {})
         self.assertIsNone(conversation["card_id"])
         self.assertEqual(repositories.get_state(conversation["id"])["attributes"], {"luck": 7})
+        self.assertEqual(
+            conversation["attribute_schema"],
+            {"attributes": {"luck": 7}, "characters": {}},
+        )
         self.assertEqual(repositories.get_conversation_cards(conversation), [])
         self.assertNotIn("角色卡：", adventure_engine.build_messages(conversation["id"])[0]["content"])
 
@@ -629,8 +706,39 @@ class MultiRoleCardConversationTests(unittest.TestCase):
         self.assertEqual(branch["parent_conversation_id"], original["id"])
         self.assertEqual(branch["card_snapshots"], original["card_snapshots"])
         self.assertEqual(repositories.get_state(branch["id"])["attributes"], {"stamina": 66})
+        self.assertEqual(branch["attribute_schema"], original["attribute_schema"])
         repositories.update_card(first["id"], {"persona": "changed after branch"})
         self.assertIn("first frozen persona", adventure_engine.build_messages(branch["id"])[0]["content"])
+
+    def test_new_conversation_and_branch_persist_attribute_schema_whitelist(self):
+        card = repositories.create_card({
+            "name": "温挽",
+            "persona": "温柔同桌",
+            "character_attributes": {"心情": 50},
+        })
+        work = repositories.create_work({
+            "title": "白名单剧本",
+            "card_ids": [card["id"]],
+            "player_attributes": {"学业": 60},
+        })
+
+        conversation = repositories.create_conversation(work["id"], "白名单会话")
+        schema = conversation["attribute_schema"]
+        self.assertEqual(schema["attributes"], {"学业": 60})
+        self.assertEqual(
+            schema["characters"]["温挽"],
+            {"心情": 50, "好感度": 0},
+        )
+
+        repositories.update_work(work["id"], {"player_attributes": {"学业": 99}})
+        repositories.update_card(card["id"], {"character_attributes": {"心情": 5, "好感度": 20}})
+        reloaded = repositories.get_conversation(conversation["id"])
+        self.assertEqual(reloaded["attribute_schema"], schema)
+
+        branch = repositories.create_conversation_branch(
+            conversation["id"], "白名单分支", "test"
+        )
+        self.assertEqual(branch["attribute_schema"], schema)
 
 
 if __name__ == "__main__":
