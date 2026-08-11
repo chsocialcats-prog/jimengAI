@@ -18,6 +18,7 @@ from ..services import (
     adventure_engine,
     commands,
     context_service,
+    reply_length,
     roll_service,
     snapshot_service,
     state_service,
@@ -129,6 +130,7 @@ def _stream_chat(conversation_id, content, client_metadata, stop_event):
     yield from _stream_ai_reply(
         conversation_id,
         stop_event,
+        client_metadata,
     )
 
 
@@ -178,7 +180,7 @@ def _stream_command(conversation_id, content, stop_event):
     )
 
 
-def _stream_ai_reply(conversation_id, stop_event):
+def _stream_ai_reply(conversation_id, stop_event, client_metadata=None):
     """调用 DeepSeek 或 mock 客户端并流式输出清洗后的剧情。"""
     config = load_config()
     inspection = context_service.inspect_context(conversation_id, config)
@@ -209,7 +211,14 @@ def _stream_ai_reply(conversation_id, stop_event):
                 "method": prepared.method or "local",
             },
         )
-    messages = prepared.messages
+    reply_settings = reply_length.resolve_reply_length(
+        client_metadata,
+        config["generation"].get("max_tokens", 2048),
+    )
+    messages = reply_length.append_reply_length_instruction(
+        prepared.messages,
+        reply_settings["key"],
+    )
     prompt_tokens = prepared.prompt_tokens_after
     assistant_message = repositories.create_message(
         conversation_id,
@@ -232,7 +241,14 @@ def _stream_ai_reply(conversation_id, stop_event):
     stopped = False
 
     try:
-        for event in client.stream_chat(messages):
+        if reply_settings["key"] is None:
+            stream = client.stream_chat(messages)
+        else:
+            stream = client.stream_chat(
+                messages,
+                max_tokens=reply_settings["max_tokens"],
+            )
+        for event in stream:
             if stop_event.is_set():
                 stopped = True
                 break
