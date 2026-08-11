@@ -213,7 +213,7 @@ def _stream_ai_reply(conversation_id, stop_event, client_metadata=None):
         )
     reply_settings = reply_length.resolve_reply_length(
         client_metadata,
-        config["generation"].get("max_tokens", 2048),
+        config.get("generation", {}).get("max_tokens", 2048),
     )
     messages = reply_length.append_reply_length_instruction(
         prepared.messages,
