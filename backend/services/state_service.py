@@ -13,8 +13,8 @@ def get_state(conversation_id):
     if state.get("characters"):
         return state
     conversation = repositories.get_conversation(conversation_id)
-    card = repositories.get_card(conversation.get("card_id")) if conversation and conversation.get("card_id") else None
-    characters = repositories._initial_character_states(card, state)
+    cards = repositories.get_conversation_cards(conversation)
+    characters = repositories._initial_character_states(cards, state)
     if not characters:
         return state
     state["characters"] = characters

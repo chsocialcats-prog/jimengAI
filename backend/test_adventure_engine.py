@@ -696,7 +696,7 @@ class MemorySummaryTests(unittest.TestCase):
         ]
         with patch.object(adventure_engine.repositories, "get_conversation", return_value=conversation), \
              patch.object(adventure_engine.repositories, "get_work", return_value=work), \
-             patch.object(adventure_engine.repositories, "get_conversation_card", return_value=card), \
+             patch.object(adventure_engine.repositories, "get_conversation_cards", return_value=[card]), \
              patch.object(adventure_engine.repositories, "get_worldbook", return_value=worldbook), \
              patch.object(adventure_engine.repositories, "get_state", return_value=state), \
              patch.object(adventure_engine.repositories, "get_messages", return_value=history), \
@@ -714,6 +714,7 @@ class MemorySummaryTests(unittest.TestCase):
             "persona-correction-marker",
             "memory-correction-marker",
             '"state-marker": 7',
+            "persona-marker",
             "<state_delta>",
             "<options>",
         ):

@@ -5,6 +5,7 @@
 所有接口路由只依赖这里的函数，避免 SQL 散落在控制器中。
 """
 
+from collections.abc import Mapping
 from contextlib import closing
 import re
 
@@ -39,6 +40,43 @@ def validate_onboarding(config):
         if field_type == "select" and default and default not in options: raise ValueError("select default 必须在 options 中")
         keys.add(key); result.append({"key":key,"label":str(field.get("label",key)).strip() or key,"type":field_type,"required":bool(field.get("required",False)),"placeholder":str(field.get("placeholder","")),"default":default, **({"options":options} if field_type == "select" else {})})
     return {"enabled":bool(config.get("enabled",False)),"intro":str(config.get("intro","")),"allow_freeform":bool(config.get("allow_freeform",False)),"fields":result}
+
+
+def validate_reply_templates(raw):
+    """Normalize reply templates into non-empty, uniquely identified mappings."""
+    if not isinstance(raw, list):
+        return []
+
+    templates = []
+    used_ids = set()
+    generated_id = 1
+
+    def next_generated_id():
+        nonlocal generated_id
+        while f"template-{generated_id}" in used_ids:
+            generated_id += 1
+        template_id = f"template-{generated_id}"
+        generated_id += 1
+        return template_id
+
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        template_id = "" if item.get("id") is None else str(item.get("id")).strip()
+        name = "" if item.get("name") is None else str(item.get("name")).strip()
+        content = "" if item.get("content") is None else str(item.get("content"))
+        if not name and not content.strip():
+            continue
+        if not template_id or template_id in used_ids:
+            template_id = next_generated_id()
+        used_ids.add(template_id)
+        templates.append({"id": template_id, "name": name or "未命名模板", "content": content})
+    return templates
+
+
+def _normalize_active_reply_template_id(raw, templates):
+    active_id = "" if raw is None else str(raw).strip()
+    return active_id if active_id in {item["id"] for item in templates} else ""
 
 
 def normalize_state(raw=None):
@@ -170,12 +208,17 @@ class CardReferenceConflict(Exception):
         super().__init__("角色卡正在被剧本引用")
 
 
-def list_card_references(card_id):
-    return fetch_all(
-        "SELECT id, title FROM works WHERE card_id = ? "
-        "ORDER BY updated_at DESC, id DESC",
-        (card_id,),
+def _card_reference_query():
+    return (
+        "SELECT id, title FROM works WHERE id IN ("
+        "SELECT work_id FROM work_cards WHERE card_id = ? "
+        "UNION SELECT id FROM works WHERE card_id = ?"
+        ") ORDER BY updated_at DESC, id DESC"
     )
+
+
+def list_card_references(card_id):
+    return fetch_all(_card_reference_query(), (card_id, card_id))
 
 
 def delete_card(card_id):
@@ -185,9 +228,7 @@ def delete_card(card_id):
         references = [
             dict(row)
             for row in connection.execute(
-                "SELECT id, title FROM works WHERE card_id = ? "
-                "ORDER BY updated_at DESC, id DESC",
-                (card_id,),
+                _card_reference_query(), (card_id, card_id)
             ).fetchall()
         ]
         if references:
@@ -363,6 +404,73 @@ def delete_worldbook_entry(entry_id):
 # ---------- 作品 ----------
 
 
+def normalize_card_ids(data, *, for_update=False):
+    """Normalize legacy and multi-card input while preserving explicit clearing."""
+    if "card_ids" in data:
+        raw_ids = data["card_ids"] or []
+    elif "card_id" in data:
+        raw_ids = [] if data["card_id"] is None else [data["card_id"]]
+    elif for_update:
+        return None
+    else:
+        raw_ids = []
+    if not isinstance(raw_ids, list):
+        raise ValueError("角色卡列表必须是数组")
+    card_ids = []
+    for raw_card_id in raw_ids:
+        card_id = int(raw_card_id)
+        if card_id in card_ids:
+            raise ValueError("角色卡不能重复引用")
+        card_ids.append(card_id)
+    return card_ids
+
+
+def _normalize_player_attributes(data, *, for_update=False):
+    if "player_attributes" not in data:
+        return None if for_update else {}
+    attributes = data["player_attributes"]
+    if attributes is None:
+        return None if for_update else {}
+    if not isinstance(attributes, dict):
+        raise ValueError("玩家属性必须是对象")
+    return attributes
+
+
+def _ordered_work_cards(work_id, legacy_card_id=None):
+    rows = fetch_all(
+        "SELECT card_id FROM work_cards WHERE work_id = ? ORDER BY position ASC", (work_id,)
+    )
+    card_ids = [row["card_id"] for row in rows]
+    if not card_ids and legacy_card_id is not None:
+        card_ids = [legacy_card_id]
+    return card_ids, [card for card_id in card_ids if (card := get_card(card_id)) is not None]
+
+
+def _validate_card_ids(connection, card_ids):
+    if not card_ids:
+        return
+    placeholders = ", ".join("?" for _ in card_ids)
+    rows = connection.execute(
+        f"SELECT id FROM cards WHERE id IN ({placeholders})", card_ids
+    ).fetchall()
+    found_ids = {row["id"] for row in rows}
+    if len(found_ids) != len(card_ids):
+        raise ValueError("角色卡不存在")
+
+
+def _replace_work_cards(connection, work_id, card_ids):
+    _validate_card_ids(connection, card_ids)
+    connection.execute("DELETE FROM work_cards WHERE work_id = ?", (work_id,))
+    connection.executemany(
+        "INSERT INTO work_cards (work_id, card_id, position) VALUES (?, ?, ?)",
+        [(work_id, card_id, position) for position, card_id in enumerate(card_ids)],
+    )
+    connection.execute(
+        "UPDATE works SET card_id = ? WHERE id = ?",
+        (card_ids[0] if card_ids else None, work_id),
+    )
+
+
 def row_to_work(row):
     """把作品数据库行转为接口字典。"""
     if row is None:
@@ -370,6 +478,17 @@ def row_to_work(row):
     data = dict(row)
     data["tags"] = json_loads(data.get("tags"), [])
     data["onboarding"] = json_loads(data.get("onboarding"), {})
+    data["reply_templates"] = validate_reply_templates(
+        json_loads(data.get("reply_templates"), [])
+    )
+    data["active_reply_template_id"] = _normalize_active_reply_template_id(
+        data.get("active_reply_template_id"), data["reply_templates"]
+    )
+    player_attributes = json_loads(data.get("player_attributes"), {})
+    data["player_attributes"] = player_attributes if isinstance(player_attributes, dict) else {}
+    data["card_ids"], data["cards"] = _ordered_work_cards(data["id"], data.get("card_id"))
+    data["card_id"] = data["card_ids"][0] if data["card_ids"] else None
+    data["card"] = data["cards"][0] if data["cards"] else None
     data["is_archive"] = bool(data.get("is_archive"))
     return data
 
@@ -408,39 +527,67 @@ def get_work(work_id):
 def create_work(data):
     """新增作品。"""
     now = now_str()
-    work_id = execute(
-        """
-        INSERT INTO works (
-            title, description, card_id, worldbook_id, opening, tags, onboarding, cover_url,
-            is_archive, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            data.get("title", ""),
-            data.get("description", ""),
-            data.get("card_id"),
-            data.get("worldbook_id"),
-            data.get("opening", ""),
-            json_dumps(data.get("tags", [])),
-            json_dumps(validate_onboarding(data.get("onboarding", {}))),
-            data.get("cover_url", ""),
-            int(bool(data.get("is_archive", False))),
-            now,
-            now,
-        ),
+    card_ids = normalize_card_ids(data)
+    player_attributes = _normalize_player_attributes(data)
+    reply_templates = validate_reply_templates(data.get("reply_templates", []))
+    active_reply_template_id = _normalize_active_reply_template_id(
+        data.get("active_reply_template_id"), reply_templates
     )
+    with closing(connect()) as connection:
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            _validate_card_ids(connection, card_ids)
+            work_id = connection.execute(
+                """
+                INSERT INTO works (
+                    title, description, card_id, player_attributes, worldbook_id, opening, tags, onboarding,
+                    cover_url, reply_templates, active_reply_template_id, is_archive, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    data.get("title", ""), data.get("description", ""), None,
+                    json_dumps(player_attributes), data.get("worldbook_id"), data.get("opening", ""),
+                    json_dumps(data.get("tags", [])), json_dumps(validate_onboarding(data.get("onboarding", {}))),
+                    data.get("cover_url", ""), json_dumps(reply_templates), active_reply_template_id,
+                    int(bool(data.get("is_archive", False))), now, now,
+                ),
+            ).lastrowid
+            _replace_work_cards(connection, work_id, card_ids)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
     return get_work(work_id)
 
 
 def update_work(work_id, data):
     """更新作品。"""
+    card_ids = normalize_card_ids(data, for_update=True)
+    player_attributes = _normalize_player_attributes(data, for_update=True)
     fields = _clean_update_data(data)
-    for key in ("card_id", "worldbook_id"):
+    fields.pop("card_id", None)
+    fields.pop("card_ids", None)
+    fields.pop("player_attributes", None)
+    if "reply_templates" in fields or "active_reply_template_id" in fields:
+        current_work = get_work(work_id)
+        if current_work is None:
+            return None
+        reply_templates = (
+            validate_reply_templates(fields["reply_templates"])
+            if "reply_templates" in fields
+            else current_work["reply_templates"]
+        )
+        fields["reply_templates"] = reply_templates
+        fields["active_reply_template_id"] = _normalize_active_reply_template_id(
+            fields.get("active_reply_template_id", current_work["active_reply_template_id"]),
+            reply_templates,
+        )
+    for key in ("worldbook_id",):
         if key in data:
             fields[key] = data[key]
     assignments = []
     params = []
-    for key in ("title", "description", "card_id", "worldbook_id", "opening", "cover_url"):
+    for key in ("title", "description", "worldbook_id", "opening", "cover_url"):
         if key in fields:
             assignments.append(f"{key} = ?")
             params.append(fields[key])
@@ -450,14 +597,34 @@ def update_work(work_id, data):
     if "onboarding" in fields:
         assignments.append("onboarding = ?")
         params.append(json_dumps(validate_onboarding(fields["onboarding"])))
+    if "reply_templates" in fields:
+        assignments.append("reply_templates = ?")
+        params.append(json_dumps(fields["reply_templates"]))
+    if "active_reply_template_id" in fields:
+        assignments.append("active_reply_template_id = ?")
+        params.append(fields["active_reply_template_id"])
     if "is_archive" in fields:
         assignments.append("is_archive = ?")
         params.append(int(bool(fields["is_archive"])))
-    if assignments:
+    if player_attributes is not None:
+        assignments.append("player_attributes = ?")
+        params.append(json_dumps(player_attributes))
+    if assignments or card_ids is not None:
         assignments.append("updated_at = ?")
         params.append(now_str())
         params.append(work_id)
-        execute(f"UPDATE works SET {', '.join(assignments)} WHERE id = ?", params)
+        with closing(connect()) as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                if card_ids is not None:
+                    _validate_card_ids(connection, card_ids)
+                connection.execute(f"UPDATE works SET {', '.join(assignments)} WHERE id = ?", params)
+                if card_ids is not None:
+                    _replace_work_cards(connection, work_id, card_ids)
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
     return get_work(work_id)
 
 
@@ -469,13 +636,24 @@ def delete_work(work_id):
 # ---------- 会话与消息 ----------
 
 
+_EMPTY_CARD_SNAPSHOT_MARKER = {"_conversation_card_snapshots_authoritative": True}
+
+
+class ConversationRecord(dict):
+    """Conversation mapping with non-serialized snapshot provenance."""
+
+
 def row_to_conversation(row):
     """把会话数据库行转为接口字典。"""
     if row is None:
         return None
-    data = dict(row)
+    data = ConversationRecord(row)
     data["current_state"] = json_loads(data.get("current_state"), {})
-    data["card_snapshot"] = json_loads(data.get("card_snapshot"), {})
+    card_snapshot = json_loads(data.get("card_snapshot"), {})
+    data._card_snapshots_authoritative = card_snapshot == _EMPTY_CARD_SNAPSHOT_MARKER
+    data["card_snapshot"] = {} if data._card_snapshots_authoritative else card_snapshot
+    card_snapshots = json_loads(data.get("card_snapshots"), [])
+    data["card_snapshots"] = card_snapshots if isinstance(card_snapshots, list) else []
     data["onboarding_config"] = json_loads(data.get("onboarding_config"), {})
     data["onboarding_answers"] = json_loads(data.get("onboarding_answers"), {})
     data["persona_corrections"] = json_loads(data.get("persona_corrections"), [])
@@ -491,13 +669,37 @@ def get_conversation(conversation_id):
 
 
 def get_conversation_card(conversation):
+    cards = get_conversation_cards(conversation)
+    return cards[0] if cards else None
+
+
+def _json_safe_copy(value, default):
+    copied = json_loads(json_dumps(value), default)
+    return copied if isinstance(copied, type(default)) else default
+
+
+def get_conversation_cards(conversation):
+    """Return frozen conversation cards first, with legacy/live fallbacks."""
     if not conversation:
-        return None
+        return []
+    snapshots = conversation.get("card_snapshots")
+    if isinstance(snapshots, list) and snapshots:
+        return _json_safe_copy(snapshots, [])
+    if isinstance(snapshots, list) and getattr(
+        conversation, "_card_snapshots_authoritative", False
+    ):
+        return []
     snapshot = conversation.get("card_snapshot") or {}
-    if snapshot:
-        return snapshot
+    if isinstance(snapshot, dict) and snapshot:
+        return [_json_safe_copy(snapshot, {})]
+    work_id = conversation.get("work_id")
+    if work_id:
+        work = get_work(work_id)
+        if work and work.get("cards"):
+            return _json_safe_copy(work["cards"], [])
     card_id = conversation.get("card_id")
-    return get_card(card_id) if card_id else None
+    card = get_card(card_id) if card_id else None
+    return [_json_safe_copy(card, {})] if card else []
 
 
 def list_conversations(work_id=None, page=1, page_size=20):
@@ -523,45 +725,79 @@ def list_conversations(work_id=None, page=1, page_size=20):
     }
 
 
-def _initial_character_states(card, player_state):
+def _initial_character_states(cards, player_state):
     """根据角色卡生成本次冒险中 AI 角色的独立初始状态。"""
-    if not card or not str(card.get("name") or "").strip():
-        return {}
-    name = str(card["name"]).strip()
-    configured = dict(card.get("character_attributes") or {})
-    relation = (player_state.get("relations") or {}).get(name, 0)
-    configured.setdefault("心情", 50)
-    configured.setdefault("好感度", relation if isinstance(relation, (int, float)) else 0)
-    return {name: {"attributes": configured, "flags": []}}
+    if isinstance(cards, dict):
+        cards = [cards]
+    characters = {}
+    for card in cards or []:
+        if not isinstance(card, dict) or not str(card.get("name") or "").strip():
+            continue
+        name = str(card["name"]).strip()
+        configured = dict(card.get("character_attributes") or {})
+        relation = (player_state.get("relations") or {}).get(name, 0)
+        configured.setdefault("心情", 50)
+        configured.setdefault("好感度", relation if isinstance(relation, (int, float)) else 0)
+        characters[name] = {"attributes": configured, "flags": []}
+    return characters
+
+
+def _ordered_work_cards_in_connection(connection, work_id, legacy_card_id=None):
+    rows = connection.execute(
+        "SELECT card_id FROM work_cards WHERE work_id = ? ORDER BY position ASC", (work_id,)
+    ).fetchall()
+    card_ids = [row["card_id"] for row in rows]
+    if not card_ids and legacy_card_id is not None:
+        card_ids = [legacy_card_id]
+    cards = []
+    for card_id in card_ids:
+        card = row_to_card(connection.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone())
+        if card is not None:
+            cards.append(card)
+    return card_ids, cards
 
 
 def create_conversation(work_id, title):
     """根据作品创建会话，并初始化状态、开场消息和记忆摘要。"""
-    work = get_work(work_id)
-    if work is None:
-        return None
-    card = get_card(work["card_id"]) if work.get("card_id") else None
-    initial_state = normalize_state(card["initial_state"] if card else {})
-    initial_state["characters"] = _initial_character_states(card, initial_state)
-    onboarding = validate_onboarding(work.get("onboarding", {}))
     onboarding_status = "pending"
     now = now_str()
     with closing(connect()) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        work_row = connection.execute("SELECT * FROM works WHERE id = ?", (work_id,)).fetchone()
+        if work_row is None:
+            connection.rollback()
+            return None
+        work = dict(work_row)
+        player_attributes = json_loads(work.get("player_attributes"), {})
+        work["player_attributes"] = (
+            player_attributes if isinstance(player_attributes, dict) else {}
+        )
+        onboarding_raw = json_loads(work.get("onboarding"), {})
+        work["onboarding"] = onboarding_raw if isinstance(onboarding_raw, dict) else {}
+        card_ids, cards = _ordered_work_cards_in_connection(
+            connection, work_id, work_row["card_id"]
+        )
+        card_snapshots = _json_safe_copy(cards, [])
+        card = card_snapshots[0] if card_snapshots else None
+        card_snapshot = card if card else _EMPTY_CARD_SNAPSHOT_MARKER
+        initial_state = normalize_state({"attributes": work.get("player_attributes") or {}})
+        initial_state["characters"] = _initial_character_states(card_snapshots, initial_state)
+        onboarding = validate_onboarding(work.get("onboarding", {}))
         cursor = connection.execute(
             """
             INSERT INTO conversations (
                 work_id, card_id, worldbook_id, title, status,
-                current_state, card_snapshot, onboarding_status, onboarding_config, onboarding_answers, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                current_state, card_snapshot, card_snapshots, onboarding_status, onboarding_config, onboarding_answers, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 work_id,
-                work.get("card_id"),
+                card_ids[0] if card_ids else None,
                 work.get("worldbook_id"),
                 title,
                 "active",
                 json_dumps(initial_state),
-                json_dumps(card or {}),
+                json_dumps(card_snapshot), json_dumps(card_snapshots),
                 onboarding_status, json_dumps(onboarding), json_dumps({}),
                 now,
                 now,
@@ -623,6 +859,69 @@ def create_conversation(work_id, title):
                 "UPDATE conversations SET last_message_at = ? WHERE id = ?",
                 (now, conversation_id),
             )
+        connection.commit()
+    return get_conversation(conversation_id)
+
+
+def create_conversation_branch(source_conversation_id, title, branch_label=""):
+    """Create a branch with its source's frozen cards and current player state."""
+    source = get_conversation(source_conversation_id)
+    if source is None:
+        return None
+    state = normalize_state(get_state(source_conversation_id))
+    card_snapshots = _json_safe_copy(get_conversation_cards(source), [])
+    card_snapshot = (
+        card_snapshots[0]
+        if card_snapshots
+        else _EMPTY_CARD_SNAPSHOT_MARKER
+        if getattr(source, "_card_snapshots_authoritative", False)
+        else {}
+    )
+    card_id = card_snapshot.get("id") if isinstance(card_snapshot, dict) else None
+    if card_id is None:
+        card_id = source.get("card_id")
+    now = now_str()
+    with closing(connect()) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        cursor = connection.execute(
+            """
+            INSERT INTO conversations (
+                work_id, card_id, worldbook_id, title, status, current_state,
+                card_snapshot, card_snapshots, parent_conversation_id, branch_label,
+                onboarding_status, onboarding_config, onboarding_answers,
+                persona_corrections, memory_corrections, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                source.get("work_id"), card_id, source.get("worldbook_id"), title,
+                "active", json_dumps(state), json_dumps(card_snapshot),
+                json_dumps(card_snapshots), source_conversation_id, branch_label,
+                source.get("onboarding_status", "completed"),
+                json_dumps(source.get("onboarding_config") or {}),
+                json_dumps(source.get("onboarding_answers") or {}),
+                json_dumps(source.get("persona_corrections") or []),
+                json_dumps(source.get("memory_corrections") or []), now, now,
+            ),
+        )
+        conversation_id = cursor.lastrowid
+        connection.execute(
+            """
+            INSERT INTO states (
+                conversation_id, attributes, items, money, relations,
+                quests, flags, characters, logs, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                conversation_id, json_dumps(state["attributes"]), json_dumps(state["items"]),
+                state["money"], json_dumps(state["relations"]), json_dumps(state["quests"]),
+                json_dumps(state["flags"]), json_dumps(state["characters"]),
+                json_dumps(state["logs"]), now,
+            ),
+        )
+        connection.execute(
+            "INSERT INTO memory_summaries (conversation_id, summary, updated_at) VALUES (?, '', ?)",
+            (conversation_id, now),
+        )
         connection.commit()
     return get_conversation(conversation_id)
 

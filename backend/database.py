@@ -66,6 +66,8 @@ CREATE TABLE IF NOT EXISTS works (
     tags TEXT NOT NULL DEFAULT '[]',
     onboarding TEXT NOT NULL DEFAULT '{}',
     cover_url TEXT NOT NULL DEFAULT '',
+    reply_templates TEXT NOT NULL DEFAULT '[]',
+    active_reply_template_id TEXT NOT NULL DEFAULT '',
     is_archive INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
@@ -321,46 +323,50 @@ def _backfill_work_player_attributes(connection):
     """从每个旧剧本的首张角色卡复制玩家初始属性。"""
     rows = connection.execute(
         """
-        SELECT works.id AS work_id, cards.initial_state
+        SELECT works.id AS work_id, works.player_attributes, cards.initial_state
         FROM works
-        JOIN work_cards ON work_cards.work_id = works.id
-        JOIN cards ON cards.id = work_cards.card_id
-        WHERE (
-              works.player_attributes IS NULL
-           OR TRIM(works.player_attributes) IN ('', '{}')
-        )
-          AND work_cards.position = (
-              SELECT MIN(first_card.position)
-              FROM work_cards AS first_card
-              WHERE first_card.work_id = works.id
-          )
+        LEFT JOIN work_cards
+          ON work_cards.work_id = works.id
+         AND work_cards.position = (
+             SELECT MIN(first_card.position)
+             FROM work_cards AS first_card
+             WHERE first_card.work_id = works.id
+         )
+        LEFT JOIN cards ON cards.id = work_cards.card_id
         """
     ).fetchall()
     for row in rows:
-        initial_state = json_loads(row["initial_state"], {})
-        attributes = (
-            initial_state.get("attributes", {})
-            if isinstance(initial_state, dict)
-            else {}
-        )
-        if not isinstance(attributes, dict):
+        raw_attributes = row["player_attributes"]
+        if raw_attributes is None or str(raw_attributes).strip() in ("", "{}"):
+            initial_state = json_loads(row["initial_state"], {})
+            attributes = (
+                initial_state.get("attributes", {})
+                if isinstance(initial_state, dict)
+                else {}
+            )
+            if not isinstance(attributes, dict):
+                attributes = {}
+        elif isinstance(json_loads(raw_attributes, None), dict):
+            continue
+        else:
             attributes = {}
+
+        normalized_attributes = json_dumps(attributes)
+        if raw_attributes == normalized_attributes:
+            continue
         connection.execute(
             """
             UPDATE works
             SET player_attributes = ?
             WHERE id = ?
-              AND (
-                  player_attributes IS NULL
-                  OR TRIM(player_attributes) IN ('', '{}')
-              )
             """,
-            (json_dumps(attributes), row["work_id"]),
+            (normalized_attributes, row["work_id"]),
         )
 
 
 def _backfill_conversation_card_snapshot_arrays(connection):
     """将旧的单角色会话快照包装成多角色快照数组。"""
+    empty_snapshot_marker = {"_conversation_card_snapshots_authoritative": True}
     rows = connection.execute(
         """
         SELECT id, card_snapshot, card_snapshots
@@ -372,6 +378,18 @@ def _backfill_conversation_card_snapshot_arrays(connection):
             card_snapshots = json.loads(row["card_snapshots"])
         except (json.JSONDecodeError, TypeError):
             card_snapshots = None
+        if isinstance(card_snapshots, list):
+            cleaned_snapshots = [
+                snapshot
+                for snapshot in card_snapshots
+                if snapshot != empty_snapshot_marker
+            ]
+            if cleaned_snapshots != card_snapshots:
+                connection.execute(
+                    "UPDATE conversations SET card_snapshots = ? WHERE id = ?",
+                    (json_dumps(cleaned_snapshots), row["id"]),
+                )
+                continue
         if isinstance(card_snapshots, list) and card_snapshots:
             continue
 
@@ -383,7 +401,7 @@ def _backfill_conversation_card_snapshot_arrays(connection):
                 card_snapshot = json.loads(raw_card_snapshot)
             except (json.JSONDecodeError, TypeError):
                 card_snapshot = raw_card_snapshot
-            if card_snapshot in (None, {}, [], ""):
+            if card_snapshot in (None, {}, [], "") or card_snapshot == empty_snapshot_marker:
                 card_snapshots = []
             else:
                 card_snapshots = [card_snapshot]
@@ -440,6 +458,8 @@ def init_db():
             )
             _ensure_column(connection, "works", "onboarding", "ALTER TABLE works ADD COLUMN onboarding TEXT NOT NULL DEFAULT '{}'")
             _ensure_column(connection, "works", "cover_url", "ALTER TABLE works ADD COLUMN cover_url TEXT NOT NULL DEFAULT ''")
+            _ensure_column(connection, "works", "reply_templates", "ALTER TABLE works ADD COLUMN reply_templates TEXT NOT NULL DEFAULT '[]'")
+            _ensure_column(connection, "works", "active_reply_template_id", "ALTER TABLE works ADD COLUMN active_reply_template_id TEXT NOT NULL DEFAULT ''")
             _ensure_column(connection, "conversations", "onboarding_status", "ALTER TABLE conversations ADD COLUMN onboarding_status TEXT NOT NULL DEFAULT 'completed'")
             _ensure_column(connection, "conversations", "onboarding_config", "ALTER TABLE conversations ADD COLUMN onboarding_config TEXT NOT NULL DEFAULT '{}'")
             _ensure_column(connection, "conversations", "onboarding_answers", "ALTER TABLE conversations ADD COLUMN onboarding_answers TEXT NOT NULL DEFAULT '{}'")

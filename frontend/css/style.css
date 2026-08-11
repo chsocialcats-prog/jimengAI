@@ -607,6 +607,17 @@ main#app {
   font-size: 12px;
 }
 
+.role-card-summary,
+.session-card-summary {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.role-card-summary.empty {
+  color: var(--faint);
+}
+
 .work-card-actions {
   display: flex;
   align-items: center;
@@ -864,6 +875,11 @@ main#app {
   font-size: 12px;
 }
 
+.session-card-summary {
+  max-width: 42%;
+  text-align: right;
+}
+
 .message-list {
   flex: 1;
   min-height: 0;
@@ -1010,6 +1026,26 @@ main#app {
   display: flex;
   align-items: flex-end;
   gap: 10px;
+}
+
+.reply-length-control {
+  display: flex;
+  flex: 0 0 156px;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.reply-length-control select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
 }
 
 .composer textarea {
@@ -1294,6 +1330,53 @@ main#app {
   flex: 0 0 auto;
 }
 
+.work-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.work-card-row,
+.work-card-add-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.work-card-row {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.work-card-row-summary {
+  min-width: 0;
+  flex: 1;
+}
+
+.work-card-row-summary strong,
+.work-card-row-summary span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.work-card-row-summary span,
+.work-card-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.work-card-row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.work-card-add-row .select {
+  flex: 1;
+}
+
 .entry-list {
   display: flex;
   flex-direction: column;
@@ -1331,6 +1414,40 @@ main#app {
 }
 
 .entry-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-2);
+}
+
+.reply-template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 8px 0;
+}
+
+.reply-template-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.reply-template-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.reply-template-header .reply-template-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.reply-template-active {
   width: 16px;
   height: 16px;
   accent-color: var(--accent-2);
@@ -1486,6 +1603,10 @@ main#app {
     min-height: 0;
   }
 
+  .session-card-summary {
+    max-width: 36%;
+  }
+
   .conversation-pane {
     height: calc(100dvh - 108px);
     min-height: 560px;
@@ -1518,6 +1639,29 @@ main#app {
 }
 
 @media (max-width: 720px) {
+  .work-card-row,
+  .work-card-add-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .session-card-summary {
+    display: none;
+  }
+
+  .work-card-row-actions {
+    justify-content: flex-end;
+  }
+
+  .reply-template-header {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .reply-template-header .reply-template-name {
+    flex-basis: 100%;
+  }
+
   .topbar {
     height: auto;
     min-height: var(--topbar-height);
@@ -2198,7 +2342,24 @@ main#app:has(.adventure-shell) .composer textarea {
   line-height: 1.6;
 }
 
+main#app:has(.adventure-shell) .reply-length-control select {
+  min-height: 52px;
+}
+
 @media (max-width: 720px) {
+  .composer-row {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .reply-length-control {
+    flex-basis: 100%;
+  }
+
+  .composer-row .reply-length-control + textarea {
+    min-width: 0;
+  }
+
   main#app:has(.adventure-shell) .message {
     font-size: 16px;
     line-height: 1.68;

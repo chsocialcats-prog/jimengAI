@@ -56,26 +56,40 @@ class WorldbookEntryUpdate(BaseModel):
     enabled: Optional[bool] = None
 
 
+class ReplyTemplate(BaseModel):
+    id: str = ""
+    name: str = ""
+    content: str = ""
+
+
 class WorkCreate(BaseModel):
     title: str
     description: str = ""
     card_id: Optional[int] = None
+    card_ids: Optional[list[int]] = None
+    player_attributes: Optional[dict] = None
     worldbook_id: Optional[int] = None
     opening: str = ""
     tags: list = Field(default_factory=list)
     onboarding: dict = Field(default_factory=dict)
     cover_url: str = ""
+    reply_templates: list[ReplyTemplate] = Field(default_factory=list)
+    active_reply_template_id: str = ""
 
 
 class WorkUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     card_id: Optional[int] = None
+    card_ids: Optional[list[int]] = None
+    player_attributes: Optional[dict] = None
     worldbook_id: Optional[int] = None
     opening: Optional[str] = None
     tags: Optional[list] = None
     onboarding: Optional[dict] = None
     cover_url: Optional[str] = None
+    reply_templates: Optional[list[ReplyTemplate]] = None
+    active_reply_template_id: Optional[str] = None
     is_archive: Optional[bool] = None
 
 
