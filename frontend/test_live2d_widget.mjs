@@ -25,6 +25,7 @@ test("keeps the widget runtime and model catalog local", () => {
   assert.match(loaderSource, /models\.json/);
   assert.match(loaderSource, /live2d\.min\.js/);
   assert.match(loaderSource, /showToggleAfterQuit:\s*true/);
+  assert.match(loaderSource, /drag:\s*true/);
   assert.doesNotMatch(loaderSource, /cubism\.live2d\.com|fastly\.jsdelivr\.net/);
   assert.ok(Array.isArray(modelCatalog.models));
   assert.ok(modelCatalog.models.length >= 6);

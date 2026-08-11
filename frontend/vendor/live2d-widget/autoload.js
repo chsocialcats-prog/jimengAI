@@ -61,7 +61,7 @@ async function loadWidgetTips() {
     tools: ["switch-model", "photo", "info", "quit"],
     showToggleAfterQuit: true,
     logLevel: "warn",
-    drag: false,
+    drag: true,
   });
 })().catch((error) => {
   console.error("[Live2D Widget] local runtime failed to start", error);
