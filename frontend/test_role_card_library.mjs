@@ -233,7 +233,7 @@ test("role-card editor exposes JSON format help beside the upload control", () =
   const editor = mainJs.slice(editorStart, editorEnd);
   assert.match(editor, /id="card-file"/);
   assert.match(editor, /id="card-json-format-btn"/);
-  assert.match(editor, /JSON 鏍煎紡/);
+  assert.match(editor, /JSON 格式/);
 
   const bindStart = mainJs.indexOf("function bindCardEditorEvents");
   const bindEnd = mainJs.indexOf("function setCardEditorSaveEnabled", bindStart);
