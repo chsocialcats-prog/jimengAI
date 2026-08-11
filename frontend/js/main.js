@@ -13,6 +13,43 @@ const MOCK_DATA_KEY = "adventure_mock_data";
 const MOCK_SETTINGS_KEY = "adventure_mock_settings";
 const API_KEY_DRAFT_KEY = "adventure_api_key_draft";
 
+const REPLY_LENGTH_PRESETS = {
+  short: { label: "简短", maxTokens: 1024, hint: "约 300-500 字" },
+  standard: { label: "标准", maxTokens: 2048, hint: "约 600-1000 字" },
+  detailed: { label: "详细", maxTokens: 4096, hint: "约 1000-1800 字" },
+  long: { label: "很长", maxTokens: 8192, hint: "约 2000-3500 字" },
+};
+const DEFAULT_REPLY_LENGTH = "detailed";
+const REPLY_LENGTH_STORAGE_PREFIX = "adventure_reply_length:";
+
+function normalizeReplyLength(value) {
+  return Object.prototype.hasOwnProperty.call(REPLY_LENGTH_PRESETS, value)
+    ? value
+    : DEFAULT_REPLY_LENGTH;
+}
+
+function replyLengthStorageKey(conversationId) {
+  return `${REPLY_LENGTH_STORAGE_PREFIX}${conversationId}`;
+}
+
+function loadReplyLength(conversationId, storage = localStorage) {
+  if (!conversationId || !storage) return DEFAULT_REPLY_LENGTH;
+  try {
+    return normalizeReplyLength(storage.getItem(replyLengthStorageKey(conversationId)));
+  } catch {
+    return DEFAULT_REPLY_LENGTH;
+  }
+}
+
+function saveReplyLength(conversationId, value, storage = localStorage) {
+  const normalized = normalizeReplyLength(value);
+  if (!conversationId || !storage) return normalized;
+  try {
+    storage.setItem(replyLengthStorageKey(conversationId), normalized);
+  } catch {}
+  return normalized;
+}
+
 modalRoot?.addEventListener("click", (event) => {
   const closeButton = event.target.closest("[data-close]");
   if (!closeButton || !modalRoot.contains(closeButton)) return;
