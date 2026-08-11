@@ -700,6 +700,18 @@ def get_conversation(conversation_id):
     )
 
 
+def _state_with_attribute_schema_characters(state, conversation):
+    state = normalize_state(state)
+    if state["characters"]:
+        return state
+    fallback_state = normalize_state(state)
+    fallback_state["characters"] = _initial_character_states(
+        get_conversation_cards(conversation),
+        fallback_state,
+    )
+    return fallback_state
+
+
 def get_or_create_attribute_schema(conversation_id):
     conversation = get_conversation(conversation_id)
     if conversation is None:
@@ -708,14 +720,10 @@ def get_or_create_attribute_schema(conversation_id):
     if existing:
         return existing
 
-    state = normalize_state(get_state(conversation_id))
-    if not state["characters"]:
-        fallback_state = normalize_state(state)
-        fallback_state["characters"] = _initial_character_states(
-            get_conversation_cards(conversation),
-            fallback_state,
-        )
-        state = fallback_state
+    state = _state_with_attribute_schema_characters(
+        get_state(conversation_id),
+        conversation,
+    )
     schema = build_attribute_schema(state)
 
     with closing(connect()) as connection:
@@ -956,7 +964,9 @@ def create_conversation_branch(source_conversation_id, title, branch_label=""):
         card_id = source.get("card_id")
     attribute_schema = normalize_attribute_schema(source.get("attribute_schema"))
     if not attribute_schema:
-        attribute_schema = build_attribute_schema(state)
+        attribute_schema = build_attribute_schema(
+            _state_with_attribute_schema_characters(state, source)
+        )
     now = now_str()
     with closing(connect()) as connection:
         connection.execute("BEGIN IMMEDIATE")

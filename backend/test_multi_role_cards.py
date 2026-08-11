@@ -710,6 +710,40 @@ class MultiRoleCardConversationTests(unittest.TestCase):
         repositories.update_card(first["id"], {"persona": "changed after branch"})
         self.assertIn("first frozen persona", adventure_engine.build_messages(branch["id"])[0]["content"])
 
+    def test_branch_legacy_empty_schema_backfills_characters_from_frozen_snapshot(self):
+        card = repositories.create_card({
+            "name": "温挽",
+            "persona": "温柔同桌",
+            "character_attributes": {"心情": 50, "好感度": 7},
+        })
+        work = repositories.create_work({
+            "title": "legacy branch work",
+            "card_ids": [card["id"]],
+            "player_attributes": {"学业": 60},
+        })
+        conversation = repositories.create_conversation(work["id"], "legacy source")
+        database.execute(
+            "UPDATE conversations SET attribute_schema = ? WHERE id = ?",
+            ("", conversation["id"]),
+        )
+        repositories.save_state(
+            conversation["id"],
+            {
+                "attributes": {"学业": 66},
+                "characters": {},
+            },
+        )
+
+        branch = repositories.create_conversation_branch(
+            conversation["id"], "legacy branch", "test"
+        )
+
+        self.assertEqual(branch["attribute_schema"]["attributes"], {"学业": 66})
+        self.assertEqual(
+            branch["attribute_schema"]["characters"],
+            {"温挽": {"心情": 50, "好感度": 7}},
+        )
+
     def test_new_conversation_and_branch_persist_attribute_schema_whitelist(self):
         card = repositories.create_card({
             "name": "温挽",
