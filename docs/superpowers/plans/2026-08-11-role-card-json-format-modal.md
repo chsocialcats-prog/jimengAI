@@ -188,4 +188,3 @@ Run:
 git add -- frontend/js/main.js frontend/css/style.css frontend/test_role_card_library.mjs
 git commit -m "feat: add role-card JSON format help"
 ```
-
