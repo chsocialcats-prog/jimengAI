@@ -157,6 +157,10 @@ class _VisibleStateFallbackBuffer:
             return ""
         self._pending += text
         if self._capturing:
+            state_block, trailing = self._split_captured_block(self._pending)
+            if trailing:
+                self._pending = state_block
+                return trailing
             return ""
 
         marker = self._pending.find(self.heading)
@@ -164,6 +168,10 @@ class _VisibleStateFallbackBuffer:
             visible = self._pending[:marker]
             self._pending = self._pending[marker:]
             self._capturing = True
+            state_block, trailing = self._split_captured_block(self._pending)
+            if trailing:
+                self._pending = state_block
+                visible += trailing
             return visible
 
         retained = self._partial_heading_length(self._pending)

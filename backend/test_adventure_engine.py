@@ -111,6 +111,26 @@ class StateInstructionTests(unittest.TestCase):
 
 
 class VisibleStateDeltaFallbackTests(unittest.TestCase):
+    def test_releases_narrative_after_visible_state_block_during_feed(self):
+        buffer = chat_routes._VisibleStateFallbackBuffer()
+
+        self.assertEqual(buffer.feed("narrative before"), "narrative before")
+
+        visible = buffer.feed(
+            "\n\n"
+            + buffer.heading
+            + "\n- study +2\n\n"
+            "narrative after"
+        )
+        self.assertIn("narrative after", visible)
+        self.assertNotIn(buffer.heading, visible)
+        self.assertEqual(buffer.feed("more narrative"), "more narrative")
+
+        buffered_tail, state_block, trailing = buffer.finish()
+        self.assertEqual(buffered_tail, "")
+        self.assertTrue(state_block.startswith(buffer.heading))
+        self.assertEqual(trailing, "")
+
     def test_stream_ai_reply_emits_context_events_for_compression(self):
         class ReplyClient:
             def __init__(self):
