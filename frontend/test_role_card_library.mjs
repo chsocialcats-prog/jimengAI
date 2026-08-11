@@ -226,3 +226,27 @@ test("persona corrections use the role card resolved for the active session", ()
   assert.match(correction, /const card = session\.card;/);
   assert.doesNotMatch(correction, /await getCard\(/);
 });
+
+test("role-card editor exposes JSON format help beside the upload control", () => {
+  const editorStart = mainJs.indexOf("async function renderCardEditor");
+  const editorEnd = mainJs.indexOf("async function renderCreator", editorStart);
+  const editor = mainJs.slice(editorStart, editorEnd);
+  assert.match(editor, /id="card-file"/);
+  assert.match(editor, /id="card-json-format-btn"/);
+  assert.match(editor, /JSON 鏍煎紡/);
+
+  const bindStart = mainJs.indexOf("function bindCardEditorEvents");
+  const bindEnd = mainJs.indexOf("function setCardEditorSaveEnabled", bindStart);
+  const bindings = mainJs.slice(bindStart, bindEnd);
+  assert.match(bindings, /card-json-format-btn/);
+  assert.match(bindings, /openModal\(roleCardJsonFormatHtml\(\)\)/);
+
+  const helpStart = mainJs.indexOf("function roleCardJsonFormatHtml");
+  const helpEnd = mainJs.indexOf("function bindCardEditorEvents", helpStart);
+  const help = mainJs.slice(helpStart, helpEnd);
+  for (const field of ["name", "persona", "personality", "speaking_style", "relationships", "directives", "initial_state", "character_attributes", "source"]) {
+    assert.match(help, new RegExp('"' + field + '"'));
+  }
+  assert.match(help, /json-format-example/);
+  assert.match(help, /data-close/);
+});
