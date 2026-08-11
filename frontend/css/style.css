@@ -1028,6 +1028,26 @@ main#app {
   gap: 10px;
 }
 
+.reply-length-control {
+  display: flex;
+  flex: 0 0 156px;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.reply-length-control select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+
 .composer textarea {
   min-height: 46px;
   max-height: 130px;
@@ -2311,7 +2331,24 @@ main#app:has(.adventure-shell) .composer textarea {
   line-height: 1.6;
 }
 
+main#app:has(.adventure-shell) .reply-length-control select {
+  min-height: 52px;
+}
+
 @media (max-width: 720px) {
+  .composer-row {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .reply-length-control {
+    flex-basis: 100%;
+  }
+
+  .composer-row .reply-length-control + textarea {
+    min-width: 0;
+  }
+
   main#app:has(.adventure-shell) .message {
     font-size: 16px;
     line-height: 1.68;

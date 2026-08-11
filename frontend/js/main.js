@@ -678,7 +678,7 @@ async function updateConversation(conversationId, title) {
   return api(`/api/conversations/${conversationId}`, { method: "PUT", body: { title } });
 }
 
-async function streamChat(conversationId, content, handlers) {
+async function streamChat(conversationId, content, handlers, metadata = {}) {
   if (MODE === "offline") {
     await mockStreamChat(conversationId, content, handlers);
     return;
@@ -688,7 +688,7 @@ async function streamChat(conversationId, content, handlers) {
     response = await fetch(`/api/conversations/${conversationId}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, metadata }),
     });
   } catch (error) {
     handlers.onError?.(error.message || "无法连接对话接口");
@@ -1511,6 +1511,8 @@ function setStreamingUi(streaming) {
   if (sendBtn) sendBtn.disabled = streaming;
   if (stopBtn) stopBtn.style.display = streaming ? "" : "none";
   if (input) input.disabled = streaming;
+  const replyLengthSelect = $("#reply-length-select");
+  if (replyLengthSelect) replyLengthSelect.disabled = streaming;
   const headerMeta = $(".conversation-header-title span");
   if (headerMeta) {
     headerMeta.textContent = streaming ? "AI 正在书写..." : `${session.messages.length} 条消息 · 自动存档已开启`;
@@ -1676,7 +1678,7 @@ async function sendMessage(content) {
       setStreamingUi(false);
       scrollMessages();
     },
-  });
+  }, activeSession.replyLength ? { reply_length: activeSession.replyLength } : {});
 }
 
 function stateSidebarHtml(state = {}) {
@@ -1865,7 +1867,8 @@ async function renderAdventure(conversationId) {
   const messages = await getMessages(conversationId);
   const state = await getState(conversationId);
   const snapshots = await getSnapshots(conversationId);
-  session = { conv, work, cards, card: cards[0] || null, messages, state, snapshots, streaming: false, hasUnsavedProgress: false, sidebarTab: "state" };
+  const replyLength = MODE === "online" ? loadReplyLength(conv.id) : null;
+  session = { conv, work, cards, card: cards[0] || null, messages, state, snapshots, replyLength, streaming: false, hasUnsavedProgress: false, sidebarTab: "state" };
   appEl.innerHTML = `
     <div class="page">
       <div class="page-head">
@@ -1902,6 +1905,7 @@ async function renderAdventure(conversationId) {
               <button class="quick-command" data-correction="memory">修正记忆</button>
             </div>
             <div class="composer-row">
+              ${MODE === "online" ? `<label class="reply-length-control" for="reply-length-select"><span>回复长度</span><select id="reply-length-select" aria-label="回复长度">${Object.entries(REPLY_LENGTH_PRESETS).map(([key, preset]) => `<option value="${key}"${key === session.replyLength ? " selected" : ""}>${esc(preset.label)} · ${esc(preset.hint)}</option>`).join("")}</select></label>` : ""}
               <textarea id="composer-input" class="textarea compact" placeholder="输入你的行动..."></textarea>
               <button class="btn btn-primary" id="send-btn">${icon("send")} 发送</button>
             </div>
@@ -1998,6 +2002,15 @@ function bindAdventureEvents() {
         event.preventDefault();
         sendMessage(input.value);
       }
+    });
+  }
+  const replyLengthSelect = $("#reply-length-select");
+  if (replyLengthSelect) {
+    replyLengthSelect.addEventListener("change", () => {
+      if (MODE !== "online" || !session) return;
+      const value = saveReplyLength(session.conv.id, replyLengthSelect.value);
+      session.replyLength = value;
+      replyLengthSelect.value = value;
     });
   }
   document.querySelectorAll("[data-sidebar-tab]").forEach((btn) => {
