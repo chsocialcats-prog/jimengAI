@@ -3,6 +3,7 @@
 
 import copy
 import json
+import math
 
 from .. import repositories
 
@@ -27,7 +28,11 @@ def _json_key(value):
 
 
 def _is_number(value):
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, float) and math.isfinite(value)
 
 
 def _is_numeric_delta(value):
@@ -38,17 +43,13 @@ def _is_numeric_delta(value):
     text = value.strip()
     if not text:
         return False
-    if text[:1] in ("+", "-"):
-        try:
-            float(text)
-            return True
-        except ValueError:
-            return False
+    if text[:1] not in ("+", "-"):
+        return False
     try:
-        float(text)
-        return True
+        parsed = float(text)
     except ValueError:
         return False
+    return math.isfinite(parsed)
 
 
 def _apply_dict_delta(target, value):

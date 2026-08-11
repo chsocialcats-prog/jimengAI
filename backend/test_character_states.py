@@ -103,6 +103,92 @@ class CharacterStateTests(unittest.TestCase):
         self.assertNotIn("陌生角色", updated["characters"])
         self.assertEqual(changed, {"attributes", "characters"})
 
+    def test_numeric_attribute_updates_reject_unsigned_strings_and_non_finite_values(self):
+        current = repositories.normalize_state({
+            "attributes": {"学业": 60, "专注": 50, "精力": 40},
+            "characters": {
+                "温执": {
+                    "attributes": {"信任": 10, "耐心": 20, "勇气": 30},
+                    "flags": [],
+                }
+            },
+        })
+        schema = {
+            "attributes": {"学业": 60, "专注": 50, "精力": 40},
+            "characters": {
+                "温执": {"信任": 10, "耐心": 20, "勇气": 30}
+            },
+        }
+
+        updated, changed = state_service.merge_state(
+            current,
+            {
+                "attributes": {
+                    "学业": "2",
+                    "专注": float("nan"),
+                    "精力": "+Infinity",
+                },
+                "characters": {
+                    "温执": {
+                        "attributes": {
+                            "信任": "2",
+                            "耐心": float("inf"),
+                            "勇气": "-Infinity",
+                        }
+                    }
+                },
+            },
+            attribute_schema=schema,
+        )
+
+        self.assertEqual(updated["attributes"], current["attributes"])
+        self.assertEqual(
+            updated["characters"]["温执"]["attributes"],
+            current["characters"]["温执"]["attributes"],
+        )
+        self.assertEqual(changed, set())
+
+    def test_numeric_attribute_updates_preserve_relative_and_finite_absolute_values(self):
+        current = repositories.normalize_state({
+            "attributes": {"学业": 60, "专注": 50},
+            "characters": {
+                "温执": {
+                    "attributes": {"信任": 10, "耐心": 20},
+                    "flags": [],
+                }
+            },
+        })
+        schema = {
+            "attributes": {"学业": 60, "专注": 50},
+            "characters": {"温执": {"信任": 10, "耐心": 20}},
+        }
+
+        updated, changed = state_service.merge_state(
+            current,
+            {
+                "attributes": {"学业": "+2", "专注": 47},
+                "characters": {
+                    "温执": {
+                        "attributes": {"信任": "-3", "耐心": 22.5}
+                    }
+                },
+            },
+            attribute_schema=schema,
+        )
+
+        self.assertEqual(updated["attributes"], {"学业": 62.0, "专注": 47})
+        self.assertEqual(
+            updated["characters"]["温执"]["attributes"],
+            {"信任": 7.0, "耐心": 22.5},
+        )
+        self.assertEqual(changed, {"attributes", "characters"})
+        for value in (
+            *updated["attributes"].values(),
+            *updated["characters"]["温执"]["attributes"].values(),
+        ):
+            self.assertIsInstance(value, (int, float))
+            self.assertNotIsInstance(value, bool)
+
     def test_filter_state_delta_does_not_mutate_input(self):
         current = repositories.normalize_state({
             "attributes": {"学业": 60},

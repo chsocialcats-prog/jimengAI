@@ -74,6 +74,41 @@ class StateInstructionTests(unittest.TestCase):
         self.assertIn("禁止新增属性", prompt)
         self.assertIn("根据本回合剧情选择真正相关的已有属性", prompt)
 
+    def test_prompt_examples_only_use_names_from_the_numeric_whitelist(self):
+        prompt = adventure_engine.build_system_prompt(
+            None,
+            None,
+            None,
+            [],
+            {
+                "attributes": {"学业": 60},
+                "items": [],
+                "money": 0,
+                "relations": {},
+                "quests": [],
+                "flags": [],
+                "characters": {
+                    "温执": {"attributes": {"信任": 10}, "flags": []}
+                },
+            },
+            "",
+            {
+                "attributes": {"学业": 60},
+                "characters": {"温执": {"信任": 10}},
+            },
+        )
+
+        self.assertIn(
+            '<state_delta>{"attributes":{"学业":"+5"}}</state_delta>',
+            prompt,
+        )
+        self.assertIn(
+            '<state_delta>{"characters":{"温执":{"attributes":{"信任":"+5"}}}}</state_delta>',
+            prompt,
+        )
+        self.assertNotIn("心情", prompt)
+        self.assertNotIn("好感度", prompt)
+
 
 class VisibleStateDeltaFallbackTests(unittest.TestCase):
     def test_stream_ai_reply_emits_context_events_for_compression(self):
@@ -353,10 +388,8 @@ class VisibleStateDeltaFallbackTests(unittest.TestCase):
     def test_stream_applies_visible_numeric_delta_without_repeating_notice(self):
         class VisibleOnlyClient:
             def stream_chat(self, _messages):
-                yield {
-                    "type": "delta",
-                    "content": "剧情继续。\n\n【状态变化】\n- 心情 +5",
-                }
+                yield {"type": "delta", "content": "剧情继续。\n\n【状"}
+                yield {"type": "delta", "content": "态变化】\n- 心情 +5"}
 
         state = {
             "attributes": {"心情": 55}, "items": [], "money": 0,
@@ -364,41 +397,50 @@ class VisibleStateDeltaFallbackTests(unittest.TestCase):
         }
         with patch.object(chat_routes, "load_config", return_value={
             "deepseek": {"model": "test-model", "api_key": "key"}
-        }), patch.object(chat_routes.adventure_engine, "build_messages", return_value=[]), \
-             patch.object(chat_routes, "create_client", return_value=VisibleOnlyClient()), \
-             patch.object(chat_routes.repositories, "create_message", return_value={"id": 17}), \
-             patch.object(chat_routes.repositories, "update_message"), \
-             patch.object(chat_routes.repositories, "get_message", return_value={"metadata": {"status": "done"}}), \
-             patch.object(chat_routes.state_service, "get_state", return_value=state), \
-             patch.object(
-                 chat_routes.state_service,
-                 "sanitize_state_delta",
-                 return_value={"attributes": {"蹇冩儏": "+5"}},
-             ), \
-             patch.object(chat_routes.state_service, "apply_state_delta") as apply_delta, \
-             patch.object(chat_routes.state_service, "format_state_delta_for_player") as format_notice, \
-             patch.object(
-                 context_service,
-                 "inspect_context",
-                 return_value=context_service.ContextInspection(
-                     messages=[], prompt_tokens=0, trigger_limit=100, needs_compression=False
-                 ),
-             ), patch.object(
-                 context_service,
-                 "prepare_context",
-                 return_value=context_service.PreparedContext(
-                     messages=[], prompt_tokens_before=0, prompt_tokens_after=0,
-                     compressed=False, method=None, covered_until_sequence=-1,
-                 ),
-             ), \
-             patch.object(chat_routes.snapshot_service, "autosave"):
+        }), patch.object(
+            chat_routes, "create_client", return_value=VisibleOnlyClient()
+        ), patch.object(
+            chat_routes.repositories, "create_message", return_value={"id": 17}
+        ), patch.object(
+            chat_routes.repositories, "update_message"
+        ) as update_message, patch.object(
+            chat_routes.repositories,
+            "get_message",
+            return_value={"metadata": {"status": "done"}},
+        ), patch.object(
+            chat_routes.state_service, "get_state", return_value=state
+        ), patch.object(
+            chat_routes.state_service.repositories,
+            "get_or_create_attribute_schema",
+            return_value={"attributes": {"心情": 55}, "characters": {}},
+        ), patch.object(
+            chat_routes.state_service, "apply_state_delta"
+        ) as apply_delta, patch.object(
+            context_service,
+            "inspect_context",
+            return_value=context_service.ContextInspection(
+                messages=[], prompt_tokens=0, trigger_limit=100,
+                needs_compression=False,
+            ),
+        ), patch.object(
+            context_service,
+            "prepare_context",
+            return_value=context_service.PreparedContext(
+                messages=[], prompt_tokens_before=0, prompt_tokens_after=0,
+                compressed=False, method=None, covered_until_sequence=-1,
+            ),
+        ), patch.object(chat_routes.snapshot_service, "autosave"):
             events = list(chat_routes._stream_ai_reply(99, threading.Event()))
 
         apply_delta.assert_called_once_with(
-            99, {"attributes": {"蹇冩儏": "+5"}}, source="test-model"
+            99, {"attributes": {"心情": "+5"}}, source="test-model"
         )
-        format_notice.assert_not_called()
-        self.assertEqual("".join(events).count("【状态变化】"), 1)
+        stream = "".join(events)
+        saved_content = update_message.call_args.kwargs["content"]
+        self.assertEqual(stream.count("【状态变化】"), 1)
+        self.assertEqual(saved_content.count("【状态变化】"), 1)
+        self.assertIn("- 心情 +5", stream)
+        self.assertIn("- 心情 +5", saved_content)
 
 
     def test_stream_sanitizes_structured_state_delta_before_apply_and_metadata(self):
@@ -459,47 +501,70 @@ class VisibleStateDeltaFallbackTests(unittest.TestCase):
     def test_stream_skips_visible_notice_and_metadata_when_visible_fallback_is_fully_filtered(self):
         class VisibleOnlyClient:
             def stream_chat(self, _messages):
+                yield {"type": "delta", "content": "剧情继续。"}
+                yield {"type": "delta", "content": "\n\n【状"}
                 yield {
                     "type": "delta",
-                    "content": "narrative\n\n??????\n- stamina +5",
+                    "content": "态变化】\n- 体力 +5\n\n随后她转身离开。",
                 }
 
         state = {
-            "attributes": {"study": 60}, "items": [], "money": 0,
+            "attributes": {"学业": 60}, "items": [], "money": 0,
             "relations": {}, "quests": [], "flags": [],
         }
         with patch.object(chat_routes, "load_config", return_value={
             "deepseek": {"model": "test-model", "api_key": "key"}
-        }), patch.object(chat_routes, "create_client", return_value=VisibleOnlyClient()),              patch.object(chat_routes.repositories, "create_message", return_value={"id": 24}),              patch.object(chat_routes.repositories, "update_message") as update_message,              patch.object(chat_routes.repositories, "get_message", return_value={"metadata": {"status": "done"}}),              patch.object(chat_routes.state_service, "get_state", return_value=state),              patch.object(
-                 chat_routes.adventure_engine,
-                 "parse_visible_state_delta",
-                 return_value={"attributes": {"stamina": "+5"}},
-             ),              patch.object(
-                 chat_routes.state_service,
-                 "sanitize_state_delta",
-                 return_value=None,
-             ) as sanitize_delta,              patch.object(chat_routes.state_service, "apply_state_delta") as apply_delta,              patch.object(chat_routes.state_service, "format_state_delta_for_player") as format_notice,              patch.object(
-                 context_service,
-                 "inspect_context",
-                 return_value=context_service.ContextInspection(
-                     messages=[{"role": "user", "content": "latest"}],
-                     prompt_tokens=0, trigger_limit=100, needs_compression=False,
-                 ),
-             ), patch.object(
-                 context_service,
-                 "prepare_context",
-                 return_value=context_service.PreparedContext(
-                     messages=[{"role": "user", "content": "latest"}],
-                     prompt_tokens_before=0, prompt_tokens_after=0,
-                     compressed=False, method=None, covered_until_sequence=-1,
-                 ),
-             ),              patch.object(chat_routes.snapshot_service, "autosave"):
+        }), patch.object(
+            chat_routes, "create_client", return_value=VisibleOnlyClient()
+        ), patch.object(
+            chat_routes.repositories, "create_message", return_value={"id": 24}
+        ), patch.object(
+            chat_routes.repositories, "update_message"
+        ) as update_message, patch.object(
+            chat_routes.repositories,
+            "get_message",
+            return_value={"metadata": {"status": "done"}},
+        ), patch.object(
+            chat_routes.state_service, "get_state", return_value=state
+        ), patch.object(
+            chat_routes.state_service.repositories,
+            "get_or_create_attribute_schema",
+            return_value={"attributes": {"学业": 60}, "characters": {}},
+        ), patch.object(
+            chat_routes.state_service, "apply_state_delta"
+        ) as apply_delta, patch.object(
+            chat_routes.state_service, "format_state_delta_for_player"
+        ) as format_notice, patch.object(
+            context_service,
+            "inspect_context",
+            return_value=context_service.ContextInspection(
+                messages=[{"role": "user", "content": "latest"}],
+                prompt_tokens=0, trigger_limit=100,
+                needs_compression=False,
+            ),
+        ), patch.object(
+            context_service,
+            "prepare_context",
+            return_value=context_service.PreparedContext(
+                messages=[{"role": "user", "content": "latest"}],
+                prompt_tokens_before=0, prompt_tokens_after=0,
+                compressed=False, method=None, covered_until_sequence=-1,
+            ),
+        ), patch.object(chat_routes.snapshot_service, "autosave"):
             events = list(chat_routes._stream_ai_reply(99, threading.Event()))
 
-        sanitize_delta.assert_called_once_with(99, {"attributes": {"stamina": "+5"}})
         apply_delta.assert_not_called()
         format_notice.assert_not_called()
-        self.assertEqual("".join(events).count("event: delta"), 1)
+        stream = "".join(events)
+        saved_content = update_message.call_args.kwargs["content"]
+        self.assertIn('event: delta\ndata: {"content": "剧情继续。"}', stream)
+        self.assertNotIn("体力", stream)
+        self.assertNotIn("【状态变化】", stream)
+        self.assertIn("剧情继续。", saved_content)
+        self.assertIn("随后她转身离开。", stream)
+        self.assertIn("随后她转身离开。", saved_content)
+        self.assertNotIn("体力", saved_content)
+        self.assertNotIn("【状态变化】", saved_content)
         self.assertIsNone(update_message.call_args.kwargs["metadata"]["state_delta"])
 
     def test_generates_a_small_character_delta_when_model_omits_one(self):

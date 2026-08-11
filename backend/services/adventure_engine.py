@@ -561,15 +561,54 @@ def build_system_prompt(work, cards, worldbook, entries, state, summary, attribu
         "2. 状态发生变化时，在剧情文本末尾附加 "
         "<state_delta>{...}</state_delta>，该块是给系统解析的，不得展示给玩家。"
     )
-    lines.append(
+    player_rule = (
         "玩家明确要求修改数值、物品、任务、关系或状态时，必须输出 "
-        "state_delta；不得只在剧情文字中声称已修改。示例："
-        '<state_delta>{"attributes":{"心情":"+5"}}</state_delta>。'
+        "state_delta；不得只在剧情文字中声称已修改。"
     )
-    lines.append(
-        "剧情角色的数值写入 characters，例如："
-        '<state_delta>{"characters":{"角色名":{"attributes":{"心情":"+5","好感度":"+2"}}}}</state_delta>。'
-    )
+    player_attributes = attribute_schema.get("attributes") or {}
+    if player_attributes:
+        player_attribute = next(iter(player_attributes))
+        player_example = {"attributes": {player_attribute: "+5"}}
+        player_rule += (
+            "示例：<state_delta>"
+            + json.dumps(
+                player_example,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            + "</state_delta>。"
+        )
+    lines.append(player_rule)
+
+    character_example = None
+    for character_name, character_attributes in (
+        attribute_schema.get("characters") or {}
+    ).items():
+        if character_attributes:
+            character_attribute = next(iter(character_attributes))
+            character_example = {
+                "characters": {
+                    character_name: {
+                        "attributes": {character_attribute: "+5"}
+                    }
+                }
+            }
+            break
+    if character_example:
+        lines.append(
+            "剧情角色的数值写入 characters，例如：<state_delta>"
+            + json.dumps(
+                character_example,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            + "</state_delta>。"
+        )
+    else:
+        lines.append(
+            "剧情角色的数值只能写入白名单中对应角色的 characters[name].attributes；"
+            "白名单没有可用角色属性时不要输出角色属性变化。"
+        )
     lines.append(
         "属性规则：只能修改白名单中本局开局已有的数字属性，使用 +5 或 -2 这类正负数字变化；"
         "玩家属性写入 attributes，剧情角色属性写入对应角色的 characters；"

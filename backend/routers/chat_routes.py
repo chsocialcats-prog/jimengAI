@@ -108,6 +108,86 @@ def _state_event(conversation_id):
     }
 
 
+class _VisibleStateFallbackBuffer:
+    """流式保留可见状态块，避免未清洗内容先发送给客户端。"""
+
+    heading = "【状态变化】"
+
+    def __init__(self):
+        self._pending = ""
+        self._capturing = False
+
+    @classmethod
+    def _partial_heading_length(cls, text):
+        maximum = min(len(text), len(cls.heading) - 1)
+        for length in range(maximum, 0, -1):
+            if cls.heading.startswith(text[-length:]):
+                return length
+        return 0
+
+    @classmethod
+    def _split_captured_block(cls, text):
+        cursor = len(cls.heading)
+        if text.startswith("\r\n", cursor):
+            cursor += 2
+        elif text.startswith("\n", cursor):
+            cursor += 1
+        elif cursor == len(text):
+            return text, ""
+        else:
+            return text, ""
+
+        block_end = cursor
+        while cursor < len(text):
+            newline = text.find("\n", cursor)
+            if newline == -1:
+                line = text[cursor:]
+                next_cursor = len(text)
+            else:
+                line = text[cursor:newline].rstrip("\r")
+                next_cursor = newline + 1
+            if not line.lstrip().startswith("-"):
+                break
+            block_end = next_cursor
+            cursor = next_cursor
+        return text[:block_end], text[block_end:]
+
+    def feed(self, text):
+        if not text:
+            return ""
+        self._pending += text
+        if self._capturing:
+            return ""
+
+        marker = self._pending.find(self.heading)
+        if marker >= 0:
+            visible = self._pending[:marker]
+            self._pending = self._pending[marker:]
+            self._capturing = True
+            return visible
+
+        retained = self._partial_heading_length(self._pending)
+        if retained:
+            visible = self._pending[:-retained]
+            self._pending = self._pending[-retained:]
+            return visible
+
+        visible = self._pending
+        self._pending = ""
+        return visible
+
+    def finish(self):
+        if not self._capturing:
+            tail = self._pending
+            self._pending = ""
+            return tail, None, ""
+
+        state_block, trailing = self._split_captured_block(self._pending)
+        self._pending = ""
+        self._capturing = False
+        return "", state_block, trailing
+
+
 def _stream_chat(conversation_id, content, client_metadata, stop_event):
     """SSE 生成器：先写玩家消息，再按指令或 AI 客户端产出事件。"""
     repositories.create_message(
@@ -236,6 +316,7 @@ def _stream_ai_reply(conversation_id, stop_event, client_metadata=None):
 
     client = create_client(config)
     output_filter = adventure_engine.StructuredOutputFilter()
+    visible_state_buffer = _VisibleStateFallbackBuffer()
     emitted = ""
     usage = None
     stopped = False
@@ -259,6 +340,7 @@ def _stream_ai_reply(conversation_id, stop_event, client_metadata=None):
                 if not chunk:
                     continue
                 visible = output_filter.feed(chunk)
+                visible = visible_state_buffer.feed(visible)
                 if visible:
                     emitted += visible
                     yield sse("delta", {"content": visible})
@@ -266,9 +348,16 @@ def _stream_ai_reply(conversation_id, stop_event, client_metadata=None):
             stopped = True
 
         tail, state_delta, judge_block, options = output_filter.finish()
+        tail = visible_state_buffer.feed(tail)
         if tail:
             emitted += tail
             yield sse("delta", {"content": tail})
+        buffered_tail, visible_state_block, trailing_narrative = (
+            visible_state_buffer.finish()
+        )
+        if buffered_tail:
+            emitted += buffered_tail
+            yield sse("delta", {"content": buffered_tail})
 
         latest_user_text = next(
             (
@@ -278,16 +367,20 @@ def _stream_ai_reply(conversation_id, stop_event, client_metadata=None):
             ),
             "",
         )
+        complete_narrative = emitted + trailing_narrative
         if not options and not stopped:
-            options = adventure_engine.parse_visible_options(emitted)
+            options = adventure_engine.parse_visible_options(complete_narrative)
         if not options and not stopped:
-            options = adventure_engine.default_turn_options(emitted, latest_user_text)
+            options = adventure_engine.default_turn_options(
+                complete_narrative, latest_user_text
+            )
 
-        visible_state_fallback = False
-        if state_delta is None:
-            state_delta = adventure_engine.parse_visible_state_delta(emitted)
-            visible_state_fallback = state_delta is not None
-        if state_delta is None and not stopped:
+        visible_state_fallback = visible_state_block is not None
+        if state_delta is None and visible_state_fallback:
+            state_delta = adventure_engine.parse_visible_state_delta(
+                visible_state_block
+            )
+        if state_delta is None and not stopped and not visible_state_fallback:
             state_delta = adventure_engine.default_turn_state_delta(
                 state_service.get_state(conversation_id), latest_user_text
             )
@@ -296,22 +389,38 @@ def _stream_ai_reply(conversation_id, stop_event, client_metadata=None):
                 conversation_id, state_delta
             ) or None
 
-        if stopped:
-            stop_marker = "\n（回复已停止）"
-            emitted += stop_marker
-            yield sse("delta", {"content": stop_marker})
-
         if state_delta:
             state_service.apply_state_delta(
                 conversation_id,
                 state_delta,
                 source=config["deepseek"]["model"] if config["deepseek"].get("api_key") else "mock",
             )
-            if not visible_state_fallback:
-                state_notice = state_service.format_state_delta_for_player(state_delta)
+            if visible_state_fallback:
+                state_notice = state_service.format_state_delta_for_player(
+                    state_delta
+                )
+                if emitted.endswith("\n\n"):
+                    state_notice = state_notice[2:]
+                elif emitted.endswith("\n"):
+                    state_notice = state_notice[1:]
                 if state_notice:
                     emitted += state_notice
                     yield sse("delta", {"content": state_notice})
+
+        if trailing_narrative:
+            emitted += trailing_narrative
+            yield sse("delta", {"content": trailing_narrative})
+
+        if stopped:
+            stop_marker = "\n（回复已停止）"
+            emitted += stop_marker
+            yield sse("delta", {"content": stop_marker})
+
+        if state_delta and not visible_state_fallback:
+            state_notice = state_service.format_state_delta_for_player(state_delta)
+            if state_notice:
+                emitted += state_notice
+                yield sse("delta", {"content": state_notice})
 
         judge_result = None
         if judge_block:
