@@ -252,11 +252,50 @@ const DEFAULT_MOCK_WORKS = [
   },
 ];
 
+function normalizeMockReplyTemplateFields(work) {
+  const normalizedWork = work && typeof work === "object" ? { ...work } : {};
+  const replyTemplates = Array.isArray(normalizedWork.reply_templates)
+    ? normalizedWork.reply_templates
+    : [];
+  const activeId = typeof normalizedWork.active_reply_template_id === "string"
+    ? normalizedWork.active_reply_template_id
+    : "";
+  const validTemplateIds = new Set(
+    replyTemplates
+      .filter((template) => template && typeof template.id === "string" && template.id.trim())
+      .map((template) => template.id)
+  );
+
+  return {
+    ...normalizedWork,
+    reply_templates: replyTemplates,
+    active_reply_template_id: validTemplateIds.has(activeId) ? activeId : "",
+  };
+}
+
+function migrateMockReplyTemplateFields() {
+  let migrated = false;
+  mockWorks = mockWorks.map((work) => {
+    const normalized = normalizeMockReplyTemplateFields(work);
+    if (
+      !work || typeof work !== "object"
+      || !Array.isArray(work.reply_templates)
+      || typeof work.active_reply_template_id !== "string"
+      || work.active_reply_template_id !== normalized.active_reply_template_id
+    ) {
+      migrated = true;
+    }
+    return normalized;
+  });
+  return migrated;
+}
+
 function loadMockData() {
   try {
     const saved = JSON.parse(localStorage.getItem(MOCK_DATA_KEY) || "null");
     if (saved && Array.isArray(saved.works)) {
       mockWorks = saved.works;
+      const needsReplyTemplateMigration = migrateMockReplyTemplateFields();
       const needsCardMigration = !Array.isArray(saved.cards);
       mockCards = needsCardMigration ? deriveMockCards(mockWorks) : saved.cards;
       mockConversations = saved.conversations || {};
@@ -267,11 +306,12 @@ function loadMockData() {
         ...mockWorks.map((work) => Number(work.id) || 0),
         ...mockCards.map((card) => Number(card.id) || 0)
       );
-      if (needsCardMigration || needsConversationSnapshotMigration) saveMockData();
+      if (needsCardMigration || needsConversationSnapshotMigration || needsReplyTemplateMigration) saveMockData();
       return;
     }
   } catch {}
   mockWorks = JSON.parse(JSON.stringify(DEFAULT_MOCK_WORKS));
+  migrateMockReplyTemplateFields();
   mockCards = deriveMockCards(mockWorks);
   mockConversations = {};
   mockSeq = Math.max(mockWorks.length * 100, ...mockCards.map((card) => Number(card.id) || 0));
@@ -920,18 +960,73 @@ function emptyHtml(title, subtitle, actionsHtml = "") {
       <h3>${esc(title)}</h3>
       <p>${esc(subtitle)}</p>
       ${actionsHtml ? `<div class="detail-actions">${actionsHtml}</div>` : ""}
-    </div>`;
+  </div>`;
+}
+
+function isRoleCard(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length);
+}
+
+function normalizeRoleCards(cards, legacyCard = null) {
+  const list = Array.isArray(cards)
+    ? cards
+    : (isRoleCard(cards) ? [cards] : (isRoleCard(legacyCard) ? [legacyCard] : []));
+  return list.filter(isRoleCard);
+}
+
+function orderedWorkCards(work = {}) {
+  const cards = normalizeRoleCards(work.cards, work.card);
+  const hasCardIds = Object.prototype.hasOwnProperty.call(work, "card_ids");
+  if (!hasCardIds) return cards;
+
+  const cardIds = Array.isArray(work.card_ids)
+    ? work.card_ids.map(Number).filter(Number.isFinite)
+    : [];
+  if (!cardIds.length || !cards.length) return [];
+
+  const cardsById = new Map(cards.map((card) => [Number(card.id), card]));
+  const usedIds = new Set();
+  const ordered = cardIds.flatMap((cardId) => {
+    const card = cardsById.get(cardId);
+    if (!card || usedIds.has(cardId)) return [];
+    usedIds.add(cardId);
+    return [card];
+  });
+  return ordered;
+}
+
+function resolveSessionCards(conversation = {}, work = {}) {
+  if (Array.isArray(conversation.card_snapshots)) {
+    return normalizeRoleCards(conversation.card_snapshots);
+  }
+  const legacySnapshots = normalizeRoleCards(null, conversation.card_snapshot);
+  return legacySnapshots.length ? legacySnapshots : orderedWorkCards(work);
+}
+
+function cardSummaryText(cards = []) {
+  const names = normalizeRoleCards(cards)
+    .map((card) => String(card.name || "未命名角色").trim())
+    .filter(Boolean);
+  return names.length ? names.join("、") : "暂无角色";
+}
+
+function roleCardSummaryHtml(cards = []) {
+  const resolvedCards = normalizeRoleCards(cards);
+  if (!resolvedCards.length) return '<span class="role-card-summary empty">暂无角色</span>';
+  return `<span class="role-card-summary">角色：${esc(cardSummaryText(resolvedCards))}</span>`;
 }
 
 function workCardHtml(work) {
   const tone = `cover-${(Number(work.id) % 6) + 1}`;
   const tags = (work.tags || []).map((tag) => `<span class="tag">${esc(tag)}</span>`).join("");
+  const cards = orderedWorkCards(work);
   return `
     <article class="work-card" data-work-id="${Number(work.id)}">
       ${coverHtml(work, tone)}
       <div class="work-card-body">
         <h3 class="work-card-title">${esc(work.title)}</h3>
         <p class="work-card-description">${esc(work.description || "")}</p>
+        ${roleCardSummaryHtml(cards)}
         ${tags ? `<div class="tag-list">${tags}</div>` : ""}
         <div class="work-card-meta">
           <span>${icon("clock")} ${formatTime(work.created_at)}</span>
@@ -1091,7 +1186,19 @@ function renderCardPanel(card) {
         ${relations ? `<div class="state-list">${relations}</div>` : ""}
         ${attrs ? `<div class="state-list">${attrs}</div>` : ""}
       </div></div>
-    </section>`;
+  </section>`;
+}
+
+function renderCardsPanel(cards = []) {
+  const resolvedCards = normalizeRoleCards(cards);
+  if (!resolvedCards.length) {
+    return `
+      <section class="section">
+        <h2 class="section-title">角色卡</h2>
+        <div class="panel"><div class="panel-body section"><p class="detail-description">暂无角色。本次剧本不使用角色卡。</p></div></div>
+      </section>`;
+  }
+  return resolvedCards.map(renderCardPanel).join("");
 }
 
 function renderWorldbookPanel(worldbook, entries = []) {
@@ -1116,7 +1223,10 @@ function renderWorldbookPanel(worldbook, entries = []) {
 
 async function renderWorkDetail(workId) {
   const work = await getWork(workId);
-  const card = await getCard(work.card_id);
+  let cards = orderedWorkCards(work);
+  if (!cards.length && workCardIds(work).length) {
+    cards = (await Promise.all(workCardIds(work).map((cardId) => getCard(cardId)))).filter(Boolean);
+  }
   const worldbook = MODE === "offline" ? work.worldbook || null : await getWorldbook(work.worldbook_id);
   const entries = MODE === "offline" ? (worldbook?.entries || []) : await getWorldbookEntries(work.worldbook_id);
   const tone = `cover-${(Number(work.id) % 6) + 1}`;
@@ -1144,7 +1254,7 @@ async function renderWorkDetail(workId) {
               <p class="detail-description">${esc(work.description || "")}</p>
               <div class="detail-meta">
                 <span>创建于 ${formatTime(work.created_at)}</span>
-                <span>${card ? `角色卡：${esc(card.name)}` : "自定义角色"}</span>
+                <span>${roleCardSummaryHtml(cards)}</span>
                 <span>${worldbook ? `世界书：${esc(worldbook.title)}` : "无世界书"}</span>
               </div>
               <div class="detail-actions">
@@ -1168,7 +1278,7 @@ async function renderWorkDetail(workId) {
             </div>
             <div class="panel"><div class="panel-body" id="conversation-list" aria-live="polite">${conversationListLoadingHtml()}</div></div>
           </section>
-          ${card ? renderCardPanel(card) : ""}
+          ${renderCardsPanel(cards)}
           ${worldbook ? renderWorldbookPanel(worldbook, entries) : ""}
         </div>
       </div>
@@ -1691,7 +1801,7 @@ async function renderOnboarding(conversationId) {
     const input = field.type === "textarea" ? `<textarea class="textarea" name="${esc(field.key)}" placeholder="${esc(field.placeholder || "")}"${required}>${esc(field.default || "")}</textarea>` : `<input class="input" name="${esc(field.key)}" value="${esc(field.default || "")}" placeholder="${esc(field.placeholder || "")}"${required}>`;
     return `${label}${input}</label>`;
   }).join("")}${config.allow_freeform ? `<label class="field"><span class="field-label">补充说明</span><textarea class="textarea" name="freeform"></textarea></label>` : ""}<div class="detail-actions"><button class="btn btn-primary" type="submit">确认并开始冒险</button><button class="btn btn-ghost" type="button" id="onboarding-back">返回剧本</button></div></div></form></div>`;
-  $("#onboarding-back")?.addEventListener("click", () => navigate(`#/work/${conversation.work_id}`));
+  $("#onboarding-back")?.addEventListener("click", () => navigate(conversation.work_id ? `#/work/${conversation.work_id}` : "#/"));
   $("#onboarding-form")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const answers = Object.fromEntries(new FormData(event.currentTarget).entries());
     try { await api(`/api/conversations/${conversationId}/onboarding`, { method: "POST", body: { answers } }); navigate(`#/adventure/${conversationId}`); }
@@ -1709,22 +1819,22 @@ async function renderAdventure(conversationId) {
   }
   const work = MODE === "offline"
     ? mockWorks.find((item) => item.id === conv.work_id)
-    : await getWork(conv.work_id);
-  const cardSnapshot = conv.card_snapshot && Object.keys(conv.card_snapshot).length ? conv.card_snapshot : null;
-  const card = MODE === "offline"
-    ? cardSnapshot || work?.card || null
-    : cardSnapshot || (work?.card_id ? await getCard(work.card_id) : null);
-  const worldbook = MODE === "offline" ? work?.worldbook : await getWorldbook(work?.worldbook_id);
+    : (conv.work_id ? await getWork(conv.work_id) : null);
+  const cards = resolveSessionCards(conv, work);
+  const card = cards[0] || null;
+  const worldbook = MODE === "offline"
+    ? work?.worldbook
+    : await getWorldbook(work?.worldbook_id ?? conv.worldbook_id);
   const messages = await getMessages(conversationId);
   const state = await getState(conversationId);
   const snapshots = await getSnapshots(conversationId);
-  session = { conv, work, card, messages, state, snapshots, streaming: false, hasUnsavedProgress: false, sidebarTab: "state" };
+  session = { conv, work, cards, card: cards[0] || null, messages, state, snapshots, streaming: false, hasUnsavedProgress: false, sidebarTab: "state" };
   appEl.innerHTML = `
     <div class="page">
       <div class="page-head">
         <div>
           <h1 class="page-title">${esc(conv.title || "冒险")}</h1>
-          <p class="page-subtitle">${esc(work ? work.title : "")}</p>
+          <p class="page-subtitle">${esc(work ? work.title : "")} · ${esc(cardSummaryText(cards))}</p>
         </div>
         <div class="detail-actions adventure-actions">
           <button class="btn btn-ghost btn-sm" id="back-btn">${icon("arrow-left")} 返回</button>
@@ -1740,6 +1850,7 @@ async function renderAdventure(conversationId) {
               <strong>${esc(conv.title)}</strong>
               <span></span>
             </div>
+            <div class="session-card-summary">${esc(cardSummaryText(cards))}</div>
             <button class="btn btn-sm btn-danger" id="stop-btn" style="display:none">${icon("stop")} 停止</button>
           </div>
           <div id="message-list" class="message-list"></div>
@@ -1769,18 +1880,21 @@ async function renderAdventure(conversationId) {
       </div>
     </div>`;
   bindAdventureEvents();
-  $("#onboarding-review-btn")?.addEventListener("click", () => openAdventureOnboarding(session.conv, work, card, worldbook, false));
-  if (conv.onboarding_status === "pending") openAdventureOnboarding(conv, work, card, worldbook, false);
+  $("#onboarding-review-btn")?.addEventListener("click", () => openAdventureOnboarding(session.conv, work, cards, worldbook, false));
+  if (conv.onboarding_status === "pending") openAdventureOnboarding(conv, work, cards, worldbook, false);
   renderMessages();
   renderSidebar(session.sidebarTab);
   setStreamingUi(false);
   scrollMessages();
 }
 
-function openAdventureOnboarding(conversation, work, card, worldbook, readOnly) {
+function openAdventureOnboarding(conversation, work, cards, worldbook, readOnly) {
   const config = conversation.onboarding_config || work?.onboarding || {};
   const fields = config.fields || [];
-  const details = `<h2>${readOnly ? "本次会话设定" : "创建本次会话"}</h2><p>${esc(config.intro || "以下信息仅作用于当前聊天；可选填写，未填内容将沿用剧本默认设定。")}</p><h3>开场剧情</h3><p>${esc(work?.opening || "")}</p><h3>角色设定：${esc(card?.name || "未设置")}</h3><p>${esc(card?.persona || card?.personality || "")}</p><h3>世界与记忆</h3><p>${esc(worldbook?.description || "")}</p>`;
+  const cardDetails = normalizeRoleCards(cards).length
+    ? normalizeRoleCards(cards).map((card) => `<h3>角色设定：${esc(card.name || "未命名角色")}</h3><p>${esc(card.persona || card.personality || "")}</p>`).join("")
+    : "<h3>角色设定</h3><p>暂无角色</p>";
+  const details = `<h2>${readOnly ? "本次会话设定" : "创建本次会话"}</h2><p>${esc(config.intro || "以下信息仅作用于当前聊天；可选填写，未填内容将沿用剧本默认设定。")}</p><h3>开场剧情</h3><p>${esc(work?.opening || "")}</p>${cardDetails}<h3>世界与记忆</h3><p>${esc(worldbook?.description || "")}</p>`;
   const visibleFields = readOnly ? [...fields, ...Object.keys(conversation.onboarding_answers || {}).filter((key) => !fields.some((field) => field.key === key)).map((key) => ({ key, label: key, type: "text" }))] : fields;
   const form = visibleFields.map((field) => {
     const value = conversation.onboarding_answers?.[field.key] || field.default || "";
@@ -1809,7 +1923,7 @@ function toggleStatusSidebar() {
 }
 
 function bindAdventureEvents() {
-  $("#back-btn")?.addEventListener("click", () => navigate(`#/work/${session.conv.work_id}`));
+  $("#back-btn")?.addEventListener("click", () => navigate(session.conv.work_id ? `#/work/${session.conv.work_id}` : "#/"));
   $("#sidebar-toggle")?.addEventListener("click", toggleStatusSidebar);
   appEl.addEventListener("click", (event) => {
     const sidebar = $("#status-sidebar");
@@ -1856,10 +1970,10 @@ function bindAdventureEvents() {
 
 async function openCorrectionModal(kind) {
   const title = kind === "persona" ? "修正人设" : "修正记忆";
-  const card = session.card;
+  const cards = Array.isArray(session.cards) ? session.cards : normalizeRoleCards(null, session.card);
   const worldbook = MODE === "offline" ? session.work?.worldbook : await getWorldbook(session.work?.worldbook_id);
   const defaultContent = kind === "persona"
-    ? [card?.persona, card?.personality, card?.speaking_style, ...(card?.directives || [])].filter(Boolean).join("\n")
+    ? cards.flatMap((card) => [card?.name, card?.persona, card?.personality, card?.speaking_style, ...(card?.directives || [])]).filter(Boolean).join("\n")
     : [worldbook?.description, ...(worldbook?.entries || []).filter((entry) => /记忆|过去|回忆/.test(`${entry.title} ${entry.content}`)).map((entry) => entry.content)].filter(Boolean).join("\n");
   modalRoot.innerHTML = `<div class="modal-backdrop"><div class="modal"><h2>${title}</h2><p>已自动带入剧本默认设定；可直接保存或编辑。仅影响当前对话之后的 AI 回复。</p><textarea id="correction-content" class="textarea" required>${esc(defaultContent)}</textarea><div class="modal-actions"><button class="btn btn-ghost" data-close>取消</button><button class="btn btn-primary" id="save-correction">保存</button></div></div></div>`;
   modalRoot.querySelector("[data-close]")?.addEventListener("click", () => modalRoot.innerHTML = "");
@@ -1891,10 +2005,22 @@ function addDynamicRow(containerSelector, options = {}) {
 }
 
 function addCharacterAttributeRow(name = "", value = "") {
-  addDynamicRow("#character-attribute-rows", { mode: "pair", placeholders: ["属性名", "数值"] });
-  const inputs = document.querySelectorAll("#character-attribute-rows .dynamic-row input");
+  addAttributeRow("#character-attribute-rows", name, value);
+}
+
+function addAttributeRow(selector, name = "", value = "") {
+  addDynamicRow(selector, { mode: "pair", placeholders: ["属性名", "数值或文本"] });
+  const inputs = document.querySelectorAll(`${selector} .dynamic-row input`);
   inputs[inputs.length - 2].value = name;
   inputs[inputs.length - 1].value = value;
+}
+
+function populateAttributeRows(selector, attributes = {}) {
+  const container = $(selector);
+  if (!container) return;
+  container.innerHTML = "";
+  Object.entries(attributes && typeof attributes === "object" ? attributes : {})
+    .forEach(([name, value]) => addAttributeRow(selector, name, value));
 }
 
 function defaultCharacterAttributes(card = {}) {
@@ -1950,8 +2076,12 @@ function collectAttributeRows(selector) {
   document.querySelectorAll(`${selector} .dynamic-row`).forEach((row) => {
     const inputs = row.querySelectorAll("input");
     const key = inputs[0]?.value.trim();
-    const value = Number(inputs[1]?.value);
-    if (key && !Number.isNaN(value)) result[key] = value;
+    const rawValue = inputs[1]?.value.trim() || "";
+    if (!key && !rawValue) return;
+    if (!key) throw new Error("属性名称不能为空");
+    if (Object.hasOwn(result, key)) throw new Error(`属性名称重复：${key}`);
+    const numericValue = Number(rawValue);
+    result[key] = rawValue !== "" && Number.isFinite(numericValue) ? numericValue : rawValue;
   });
   return result;
 }
@@ -1989,6 +2119,53 @@ function collectOnboardingFields() {
   return Array.from(document.querySelectorAll(".onboarding-field-row")).map((row, index) => ({ key: `field_${index + 1}`, label: row.querySelector(".onboarding-label").value.trim(), placeholder: row.querySelector(".onboarding-placeholder").value.trim(), type: row.querySelector(".onboarding-type").value, required: row.querySelector(".onboarding-required").checked, options: row.querySelector(".onboarding-options").value.split(/[,，]/).map((item) => item.trim()).filter(Boolean) })).filter((field) => field.label);
 }
 
+function workCardIds(work = {}) {
+  const rawIds = Array.isArray(work.card_ids)
+    ? work.card_ids
+    : (work.card_id === null || work.card_id === undefined || work.card_id === "" ? [] : [work.card_id]);
+  return [...new Set(rawIds.map(Number).filter(Number.isFinite))];
+}
+
+function collectWorkCardIds() {
+  return [...new Set(
+    Array.from(document.querySelectorAll("#work-card-rows [data-card-id]"))
+      .map((row) => Number(row.dataset.cardId))
+      .filter(Number.isFinite)
+  )];
+}
+
+function populateWorkCardRows(cards = [], selectedIds = []) {
+  const rows = $("#work-card-rows");
+  const addSelect = $("#work-card-add");
+  const addButton = $("#add-work-card");
+  workCardOptions = Array.isArray(cards) ? cards : [];
+  selectedIds = [...new Set((selectedIds || []).map(Number).filter(Number.isFinite))];
+  const selectedCards = selectedIds
+    .map((id) => workCardOptions.find((card) => Number(card.id) === id))
+    .filter(Boolean);
+  const availableCards = workCardOptions.filter((card) => !selectedIds.includes(Number(card.id)));
+  if (rows) {
+    rows.innerHTML = selectedCards.length
+      ? selectedCards.map((card, index) => `
+        <div class="work-card-row" data-card-id="${Number(card.id)}">
+          <div class="work-card-row-summary"><strong>${esc(card.name || "未命名角色")}</strong><span>${esc(cardPersonalitySummary(card))} · 来源：${esc(card.source || "未标注来源")}</span></div>
+          <div class="work-card-row-actions">
+            <button class="btn btn-sm btn-ghost" type="button" data-work-card-action="up"${index === 0 ? " disabled" : ""}>上移</button>
+            <button class="btn btn-sm btn-ghost" type="button" data-work-card-action="down"${index === selectedCards.length - 1 ? " disabled" : ""}>下移</button>
+            <button class="btn btn-sm btn-danger" type="button" data-work-card-action="remove">${icon("trash")} 移除</button>
+          </div>
+        </div>`).join("")
+      : '<p class="detail-meta work-card-empty">当前剧本暂未引用角色卡；不使用角色卡也可以保存。</p>';
+  }
+  if (addSelect) {
+    addSelect.innerHTML = availableCards.length
+      ? `<option value="">选择要添加的角色卡</option>${availableCards.map((card) => `<option value="${Number(card.id)}">${esc(card.name || "未命名角色")}</option>`).join("")}`
+      : '<option value="">没有可添加的角色卡</option>';
+    addSelect.disabled = !availableCards.length;
+  }
+  if (addButton) addButton.disabled = !availableCards.length;
+}
+
 function populateWorkCardSelect(cards = [], selectedId = null) {
   const select = $("#work-card-id");
   if (!select) return;
@@ -2007,6 +2184,39 @@ function updateWorkCardSummary() {
     : "本剧本不使用角色卡。";
 }
 
+function addReplyTemplateCard(template = {}) {
+  const card = document.createElement("div");
+  const templateId = template.id || `template-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  card.className = "reply-template-card";
+  card.dataset.templateId = templateId;
+  card.innerHTML = `
+    <div class="reply-template-header">
+      <input class="input reply-template-name" placeholder="模板名称" value="${esc(template.name || "")}">
+      <label class="entry-toggle"><input type="radio" name="active-reply-template" class="reply-template-active"> 当前模板</label>
+      <button type="button" class="btn btn-sm btn-ghost reply-template-delete">删除</button>
+    </div>
+    <textarea class="textarea compact reply-template-content" placeholder="AI 回复模板内容">${esc(template.content || "")}</textarea>`;
+  card.querySelector(".reply-template-active").checked = Boolean(template.active);
+  card.querySelector(".reply-template-delete").addEventListener("click", () => card.remove());
+  $("#reply-template-rows")?.appendChild(card);
+}
+
+function collectReplyTemplates() {
+  return Array.from(document.querySelectorAll("#reply-template-rows .reply-template-card"))
+    .map((card) => ({
+      id: card.dataset.templateId,
+      name: card.querySelector(".reply-template-name")?.value.trim() || "",
+      content: card.querySelector(".reply-template-content")?.value.trim() || "",
+    }))
+    .filter((template) => template.name || template.content);
+}
+
+function selectedReplyTemplateId() {
+  const selected = document.querySelector('input[name="active-reply-template"]:checked');
+  if (selected?.id === "disable-reply-template") return "";
+  return selected?.closest(".reply-template-card")?.dataset.templateId || "";
+}
+
 function fillCreatorForm(data = {}) {
   const work = data.work || data;
   const worldbook = data.worldbook || {};
@@ -2019,6 +2229,18 @@ function fillCreatorForm(data = {}) {
   set("#work-opening", work.opening);
   set("#work-tags", Array.isArray(work.tags) ? work.tags.join(", ") : work.tags);
   set("#work-cover-url", work.cover_url);
+  populateAttributeRows("#player-attribute-rows", work.player_attributes);
+  const templateContainer = $("#reply-template-rows");
+  if (templateContainer) templateContainer.innerHTML = "";
+  const activeTemplateId = typeof work.active_reply_template_id === "string"
+    ? work.active_reply_template_id
+    : "";
+  (work.reply_templates || []).forEach((template) => addReplyTemplateCard({
+    ...template,
+    active: template.id === activeTemplateId,
+  }));
+  const disableTemplate = $("#disable-reply-template");
+  if (disableTemplate) disableTemplate.checked = !activeTemplateId;
   $("#onboarding-field-rows") && ($("#onboarding-field-rows").innerHTML = "");
   (work.onboarding?.fields || []).forEach(addOnboardingField);
   set("#wb-title", worldbook.title);
@@ -2039,6 +2261,16 @@ async function loadCreatorEditData(workId) {
     ]);
   if (!worldbook) throw new Error("该作品关联的世界书不存在或已被删除。");
   return { work, worldbook, entries };
+}
+
+function areWorkCardIdsAvailable(work, cards) {
+  const availableIds = new Set((cards || []).map((card) => Number(card.id)).filter(Number.isFinite));
+  return workCardIds(work).every((cardId) => availableIds.has(cardId));
+}
+
+function setCreatorEditSaveEnabled(enabled) {
+  const saveButton = $("#creator-save-btn");
+  if (saveButton) saveButton.disabled = !enabled;
 }
 
 async function confirmCreatorEditSave(editState) {
@@ -2088,18 +2320,30 @@ async function saveCreatorEdit({ worldbook, work }) {
 }
 
 async function submitCreatorForm() {
+  if (creatorEditWorkId && !creatorEditState) {
+    toast("编辑数据尚未完整载入，暂不能保存。", "error");
+    return;
+  }
   const value = (id) => ($(id)?.value || "").trim();
   const onboarding = { enabled: true, fields: collectOnboardingFields() };
-  const selectedCardId = value("#work-card-id");
-  const work = {
-    title: value("#work-title") || "未命名剧本",
-    description: value("#work-description") || "一个高自由度文字冒险。",
-    opening: value("#work-opening") || "故事从这里开始。",
-    tags: value("#work-tags") ? value("#work-tags").split(/[,，、]/).map((item) => item.trim()).filter(Boolean) : ["20+"],
-    onboarding,
-    cover_url: value("#work-cover-url"),
-    card_id: selectedCardId ? Number(selectedCardId) : null,
-  };
+  let work;
+  try {
+    work = {
+      title: value("#work-title") || "未命名剧本",
+      description: value("#work-description") || "一个高自由度文字冒险。",
+      opening: value("#work-opening") || "故事从这里开始。",
+      tags: value("#work-tags") ? value("#work-tags").split(/[,，、]/).map((item) => item.trim()).filter(Boolean) : ["20+"],
+      onboarding,
+      cover_url: value("#work-cover-url"),
+      card_ids: collectWorkCardIds(),
+      player_attributes: collectAttributeRows("#player-attribute-rows"),
+      reply_templates: collectReplyTemplates(),
+      active_reply_template_id: selectedReplyTemplateId(),
+    };
+  } catch (error) {
+    toast(error.message || "玩家初始属性无效", "error");
+    return;
+  }
   const worldbook = {
     title: value("#wb-title") || `${work.title} 的世界`,
     description: value("#wb-description"),
@@ -2162,8 +2406,27 @@ async function submitCreatorForm() {
 }
 
 function bindCreatorEvents() {
-  $("#work-card-id")?.addEventListener("change", updateWorkCardSummary);
+  $("#add-player-attribute")?.addEventListener("click", () => addAttributeRow("#player-attribute-rows"));
+  $("#add-work-card")?.addEventListener("click", () => {
+    const cardId = Number($("#work-card-add")?.value);
+    if (!Number.isFinite(cardId)) return;
+    populateWorkCardRows(workCardOptions, [...collectWorkCardIds(), cardId]);
+  });
+  $("#work-card-rows")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-work-card-action]");
+    if (!button) return;
+    const action = button.dataset.workCardAction;
+    const row = button.closest("[data-card-id]");
+    const cardIds = collectWorkCardIds();
+    const index = cardIds.indexOf(Number(row?.dataset.cardId));
+    if (index < 0) return;
+    if (action === "remove") cardIds.splice(index, 1);
+    if (action === "up" && index > 0) [cardIds[index - 1], cardIds[index]] = [cardIds[index], cardIds[index - 1]];
+    if (action === "down" && index < cardIds.length - 1) [cardIds[index + 1], cardIds[index]] = [cardIds[index], cardIds[index + 1]];
+    populateWorkCardRows(workCardOptions, cardIds);
+  });
   $("#add-entry")?.addEventListener("click", addEntryCard);
+  $("#add-reply-template")?.addEventListener("click", () => addReplyTemplateCard());
   $("#add-onboarding-field")?.addEventListener("click", () => addOnboardingField());
   $("#back-btn")?.addEventListener("click", () => navigate("#/"));
   $("#preview-btn")?.addEventListener("click", () => {
@@ -2194,7 +2457,7 @@ function bindCreatorEvents() {
 }
 
 function referencedWorksForCard(cardId, works) {
-  return (works || []).filter((work) => Number(work.card_id) === Number(cardId));
+  return (works || []).filter((work) => workCardIds(work).includes(Number(cardId)));
 }
 
 function referencedWorkNames(references = []) {
@@ -2310,10 +2573,7 @@ function bindCardActionEvents(root = document) {
 
 function fillCardForm(card, { preserveHiddenInitialState = false } = {}) {
   const initialState = preserveHiddenInitialState
-    ? {
-      ...cardEditorState.initialState,
-      attributes: JSON.parse(JSON.stringify(card.initial_state?.attributes || {})),
-    }
+    ? JSON.parse(JSON.stringify(cardEditorState.initialState || {}))
     : JSON.parse(JSON.stringify(card.initial_state || {}));
   cardEditorState = {
     ...cardEditorState,
@@ -2328,7 +2588,7 @@ function fillCardForm(card, { preserveHiddenInitialState = false } = {}) {
   set("#card-persona", card.persona);
   set("#card-personality", card.personality);
   set("#card-speaking", card.speaking_style);
-  ["#directive-rows", "#attribute-rows", "#character-attribute-rows", "#relation-rows"].forEach((selector) => {
+  ["#directive-rows", "#character-attribute-rows", "#relation-rows"].forEach((selector) => {
     const container = $(selector);
     if (container) container.innerHTML = "";
   });
@@ -2336,12 +2596,6 @@ function fillCardForm(card, { preserveHiddenInitialState = false } = {}) {
     addDynamicRow("#directive-rows", { mode: "single", placeholder: "保持人设" });
     const inputs = document.querySelectorAll("#directive-rows .dynamic-row input");
     inputs[inputs.length - 1].value = directive;
-  });
-  Object.entries(card.initial_state?.attributes || {}).forEach(([name, value]) => {
-    addDynamicRow("#attribute-rows", { mode: "pair", placeholders: ["属性名", "数值"] });
-    const inputs = document.querySelectorAll("#attribute-rows .dynamic-row input");
-    inputs[inputs.length - 2].value = name;
-    inputs[inputs.length - 1].value = value;
   });
   Object.entries(defaultCharacterAttributes(card)).forEach(([name, value]) => addCharacterAttributeRow(name, value));
   Object.entries(card.relationships || {}).forEach(([name, value]) => {
@@ -2369,7 +2623,6 @@ async function submitCardForm() {
     if (references.length && !window.confirm(`此角色卡已被 ${references.length} 个剧本引用。\n引用剧本：${referenceNames}\n保存后会影响这些剧本之后新开的会话；已经开始的旧会话不会改变。`)) return;
     const initialState = {
       ...cardEditorState.initialState,
-      attributes: collectAttributeRows("#attribute-rows"),
       items: Array.isArray(cardEditorState.initialState?.items)
         ? cardEditorState.initialState.items
         : [],
@@ -2401,7 +2654,6 @@ async function submitCardForm() {
 
 function bindCardEditorEvents() {
   $("#add-directive")?.addEventListener("click", () => addDynamicRow("#directive-rows", { mode: "single", placeholder: "保持人设" }));
-  $("#add-attribute")?.addEventListener("click", () => addDynamicRow("#attribute-rows", { mode: "pair", placeholders: ["属性名", "数值"] }));
   $("#add-character-attribute")?.addEventListener("click", () => addCharacterAttributeRow());
   $("#add-relation")?.addEventListener("click", () => addDynamicRow("#relation-rows", { mode: "pair", placeholders: ["关系对象", "关系说明"] }));
   $("#card-editor-back")?.addEventListener("click", () => navigate("#/cards"));
@@ -2475,7 +2727,6 @@ async function renderCardEditor(cardId = null) {
             <label class="field span-2"><span class="field-label">语气与口头禅</span><textarea id="card-speaking" class="textarea compact" placeholder="语气、常用词与说话节奏"></textarea></label>
           </div>
           <div class="section"><h3 class="section-title">固定指令</h3><div id="directive-rows" class="dynamic-list"></div><button type="button" class="btn btn-sm btn-ghost" id="add-directive">${icon("plus")} 添加指令</button></div>
-          <div class="section"><h3 class="section-title">玩家初始属性</h3><div id="attribute-rows" class="dynamic-list"></div><button type="button" class="btn btn-sm btn-ghost" id="add-attribute">${icon("plus")} 添加属性</button></div>
           <div class="section"><h3 class="section-title">剧情角色属性（AI 角色）</h3><div id="character-attribute-rows" class="dynamic-list"></div><button type="button" class="btn btn-sm btn-ghost" id="add-character-attribute">${icon("plus")} 添加角色属性</button></div>
           <div class="section"><h3 class="section-title">文字关系</h3><div id="relation-rows" class="dynamic-list"></div><button type="button" class="btn btn-sm btn-ghost" id="add-relation">${icon("plus")} 添加关系</button></div>
         </div></section>
@@ -2485,7 +2736,6 @@ async function renderCardEditor(cardId = null) {
   bindCardEditorEvents();
   if (!isEditing) {
     addDynamicRow("#directive-rows", { mode: "single", placeholder: "保持人设" });
-    addDynamicRow("#attribute-rows", { mode: "pair", placeholders: ["属性名", "数值"] });
     addCharacterAttributeRow("心情", 50);
     addCharacterAttributeRow("好感度", 0);
     addDynamicRow("#relation-rows", { mode: "pair", placeholders: ["关系对象", "关系说明"] });
@@ -2531,12 +2781,18 @@ async function renderCreator(workId = null) {
                 <label class="field span-2"><span class="field-label">作品名</span><input id="work-title" class="input" required placeholder="例如：雾中王都"></label>
                 <label class="field span-2"><span class="field-label">简介</span><textarea id="work-description" class="textarea compact" placeholder="一句话介绍这个作品"></textarea></label>
                 <label class="field span-2"><span class="field-label">开场剧情</span><textarea id="work-opening" class="textarea" placeholder="玩家进入世界后看到的开场文字"></textarea></label>
+                <div class="field span-2"><span class="field-label">回复模板</span><label class="entry-toggle"><input type="radio" id="disable-reply-template" name="active-reply-template" class="reply-template-active" value="" checked> 不启用模板</label><div id="reply-template-rows" class="reply-template-list" data-active-field="active_reply_template_id"></div><button type="button" class="btn btn-sm btn-ghost" id="add-reply-template">${icon("plus")} 添加模板</button></div>
                 <div class="field span-2"><span class="field-label">开局引导字段</span><div id="onboarding-field-rows" class="form-stack"></div><button type="button" class="btn btn-sm btn-ghost" id="add-onboarding-field">${icon("plus")} 添加字段</button></div>
-                <label class="field span-2">
-                  <span class="field-label">角色卡</span>
-                  <select id="work-card-id" class="select"><option value="">不使用角色卡</option></select>
-                  <span id="work-card-summary" class="detail-meta">本剧本不使用角色卡。</span>
-                </label>
+                <div class="field span-2">
+                  <span class="field-label">角色卡（按顺序生效）</span>
+                  <div id="work-card-rows" class="work-card-list"><p class="detail-meta work-card-empty">当前剧本暂未引用角色卡；不使用角色卡也可以保存。</p></div>
+                  <div class="work-card-add-row"><select id="work-card-add" class="select"><option value="">正在加载角色卡…</option></select><button type="button" class="btn btn-sm btn-ghost" id="add-work-card">${icon("plus")} 添加角色卡</button></div>
+                </div>
+                <div class="field span-2">
+                  <span class="field-label">玩家初始属性</span>
+                  <div id="player-attribute-rows" class="dynamic-list"></div>
+                  <button type="button" class="btn btn-sm btn-ghost" id="add-player-attribute">${icon("plus")} 添加属性</button>
+                </div>
                 <label class="field span-2"><span class="field-label">标签</span><input id="work-tags" class="input" placeholder="20+, 奇幻, 大世界（逗号分隔）"></label>
                 <label class="field span-2"><span class="field-label">封面图片链接</span><input id="work-cover-url" class="input" placeholder="https://example.com/cover.jpg"></label>
                 <label class="field span-2"><span class="field-label">或上传本地封面</span><input id="work-cover-file" class="input" type="file" accept="image/*"></label>
@@ -2558,7 +2814,7 @@ async function renderCreator(workId = null) {
             </div>
           </section>
           <div class="settings-actions">
-            <button type="submit" class="btn btn-primary">${icon("check")} ${isEditing ? "保存更新" : "保存作品"}</button>
+            <button type="submit" class="btn btn-primary" id="creator-save-btn"${isEditing ? " disabled" : ""}>${icon("check")} ${isEditing ? "保存更新" : "保存作品"}</button>
             <button type="button" class="btn btn-ghost" id="preview-btn">${icon("eye")} 预览开场</button>
           </div>
         </form>
@@ -2576,13 +2832,65 @@ async function renderCreator(workId = null) {
     </div>`;
   addEntryCard();
   bindCreatorEvents();
+  if (isEditing && MODE === "online") {
+    setCreatorEditSaveEnabled(false);
+    const [editDataResult, cardsResult] = await Promise.allSettled([
+      loadCreatorEditData(workId),
+      listAllCards(),
+    ]);
+    let editData = null;
+    let workLoadError = null;
+    let cardLoadError = null;
+
+    if (editDataResult.status === "fulfilled") {
+      editData = editDataResult.value;
+      try {
+        fillCreatorForm(editData);
+      } catch (error) {
+        workLoadError = error;
+      }
+    } else {
+      workLoadError = editDataResult.reason;
+    }
+
+    if (cardsResult.status === "fulfilled" && editData) {
+      const cards = cardsResult.value;
+      if (areWorkCardIdsAvailable(editData.work, cards)) {
+        populateWorkCardRows(cards, workCardIds(editData.work));
+      } else {
+        cardLoadError = new Error("该剧本引用的角色卡不存在或无法加载。");
+      }
+    } else if (cardsResult.status === "rejected") {
+      cardLoadError = cardsResult.reason;
+    }
+
+    const status = $("#creator-load-status");
+    if (!workLoadError && !cardLoadError && editData) {
+      creatorEditState = {
+        workId: editData.work.id,
+        worldbookId: editData.worldbook.id || editData.work.worldbook_id,
+        entryIds: new Set(editData.entries.map((entry) => Number(entry.id)).filter(Number.isFinite)),
+      };
+      setCreatorEditSaveEnabled(true);
+      if (status) status.textContent = "编辑数据已载入。";
+      return;
+    }
+
+    const errors = [];
+    if (workLoadError) errors.push(`无法加载剧本编辑数据：${workLoadError.message || "发生未知错误"}`);
+    if (cardLoadError) errors.push(`无法加载角色卡列表：${cardLoadError.message || "发生未知错误"}`);
+    const message = errors.join("；") || "无法完成编辑数据初始化。";
+    if (status) status.textContent = `${message} 保存已禁用。`;
+    toast(message, "error");
+    return;
+  }
   try {
     const cards = await listAllCards();
-    populateWorkCardSelect(cards);
+    populateWorkCardRows(cards);
     if (isEditing) {
       const editData = await loadCreatorEditData(workId);
       fillCreatorForm(editData);
-      populateWorkCardSelect(cards, editData.work.card_id);
+      populateWorkCardRows(cards, workCardIds(editData.work));
       creatorEditState = {
         workId: editData.work.id,
         worldbookId: editData.worldbook.id || editData.work.worldbook_id,

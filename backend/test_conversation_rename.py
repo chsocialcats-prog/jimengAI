@@ -63,6 +63,27 @@ class ConversationRenameTests(unittest.TestCase):
             {"error": {"code": "validation_error", "message": "请求参数校验失败"}},
         )
 
+    def test_state_uses_frozen_card_snapshot_after_live_card_is_edited(self):
+        card = repositories.create_card({
+            "name": "Frozen hero",
+            "persona": "original persona",
+            "character_attributes": {"mood": 50},
+        })
+        work = repositories.create_work({
+            "title": "Snapshot state work",
+            "card_ids": [card["id"]],
+        })
+        conversation = repositories.create_conversation(work["id"], "Frozen state")
+        repositories.save_state(conversation["id"], {"characters": {}})
+        repositories.update_card(card["id"], {"character_attributes": {"mood": 99}})
+
+        status_code, body = self.request(
+            "GET", f"/api/conversations/{conversation['id']}/state", None
+        )
+
+        self.assertEqual(status_code, 200)
+        self.assertEqual(body["characters"]["Frozen hero"]["attributes"]["mood"], 50)
+
     def request(self, method, path, payload):
         """Invoke the ASGI app without a third-party HTTP test client."""
         raw_body = json.dumps(payload).encode("utf-8")

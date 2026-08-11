@@ -7,7 +7,13 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from backend import database
+from fastapi import HTTPException
+from pydantic import ValidationError
+
+from backend import database, repositories
+from backend.routers import works_routes
+from backend.schemas import WorkCreate, WorkUpdate
+from backend.services import adventure_engine
 
 
 # This is intentionally a pre-Task-1 schema: it has neither of the new
@@ -204,6 +210,30 @@ class MultiRoleCardMigrationTests(unittest.TestCase):
             "INSERT INTO work_cards (work_id, card_id, position) VALUES (?, ?, ?)",
             (existing_work_id, secondary_card_id, 5),
         )
+        database.execute(
+            "UPDATE works SET player_attributes = ? WHERE id = ?",
+            ("", work_ids[0]),
+        )
+        database.execute(
+            "UPDATE works SET player_attributes = ? WHERE id = ?",
+            (database.json_dumps(["not", "an", "object"]), work_ids[1]),
+        )
+        database.execute(
+            "UPDATE works SET player_attributes = ? WHERE id = ?",
+            (database.json_dumps("not-an-object"), work_ids[2]),
+        )
+        database.execute(
+            "UPDATE works SET player_attributes = ? WHERE id = ?",
+            ("not-json", work_ids[3]),
+        )
+        database.execute(
+            "UPDATE works SET player_attributes = ? WHERE id = ?",
+            (database.json_dumps(["no", "card"]), null_card_work_id),
+        )
+        database.execute(
+            "UPDATE works SET player_attributes = ? WHERE id = ?",
+            (database.json_dumps({"pinned": 1}), existing_work_id),
+        )
         preserved_snapshots = [{"name": "already valid"}]
         fallback_snapshot = {"name": "fallback"}
         database.execute(
@@ -232,6 +262,7 @@ class MultiRoleCardMigrationTests(unittest.TestCase):
         )
 
         database.init_db()
+        database.init_db()
 
         self.assertEqual(
             database.fetch_all(
@@ -245,8 +276,19 @@ class MultiRoleCardMigrationTests(unittest.TestCase):
                     "SELECT player_attributes FROM works WHERE id = ?", (existing_work_id,)
                 )["player_attributes"]
             ),
-            {"wisdom": 12},
+            {"pinned": 1},
         )
+        for work_id, expected in (
+            (work_ids[0], {"charisma": 60}),
+            (work_ids[1], {}),
+            (work_ids[2], {}),
+            (work_ids[3], {}),
+            (null_card_work_id, {}),
+        ):
+            value = database.fetch_one(
+                "SELECT player_attributes FROM works WHERE id = ?", (work_id,)
+            )["player_attributes"]
+            self.assertEqual(database.json_loads(value), expected)
         for conversation_id, expected in (
             (migrating_conversation_id, preserved_snapshots),
             (empty_conversation_id, [fallback_snapshot]),
@@ -314,6 +356,281 @@ class MultiRoleCardMigrationTests(unittest.TestCase):
                     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'work_cards'"
                 ).fetchone()
             )
+class MultiRoleCardWorkApiTests(unittest.TestCase):
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.tempdir.name) / "test.db"
+        self.db_patch = patch.object(database, "DB_PATH", self.db_path)
+        self.db_patch.start()
+        database.init_db()
+
+    def tearDown(self):
+        self.db_patch.stop()
+        self.tempdir.cleanup()
+
+    def create_card(self, name):
+        return repositories.create_card({"name": name})
+
+    def test_create_and_list_preserve_ordered_cards_and_player_attributes(self):
+        first = self.create_card("第一张")
+        second = self.create_card("第二张")
+        created = works_routes.create_work(
+            WorkCreate(title="多卡剧本", card_ids=[second["id"], first["id"]], player_attributes={"体力": 80})
+        )
+
+        self.assertEqual(created["card_ids"], [second["id"], first["id"]])
+        self.assertEqual([card["id"] for card in created["cards"]], [second["id"], first["id"]])
+        self.assertEqual(created["card_id"], second["id"])
+        self.assertEqual(created["card"]["id"], second["id"])
+        self.assertEqual(created["player_attributes"], {"体力": 80})
+        self.assertEqual(
+            works_routes.list_works(page=1, page_size=20)["items"][0]["card_ids"],
+            [second["id"], first["id"]],
+        )
+
+    def test_cards_can_be_reused_by_different_works(self):
+        card = self.create_card("可复用")
+        first_work = works_routes.create_work(WorkCreate(title="剧本一", card_ids=[card["id"]]))
+        second_work = works_routes.create_work(WorkCreate(title="剧本二", card_ids=[card["id"]]))
+
+        self.assertEqual(first_work["card_ids"], [card["id"]])
+        self.assertEqual(second_work["card_ids"], [card["id"]])
+
+    def test_update_retains_omitted_attributes_and_clears_explicit_values(self):
+        first = self.create_card("第一张")
+        second = self.create_card("第二张")
+        work = works_routes.create_work(
+            WorkCreate(title="待更新", card_ids=[first["id"], second["id"]], player_attributes={"体力": 80})
+        )
+
+        retained = works_routes.update_work(work["id"], WorkUpdate(title="只改标题"))
+        cleared_cards = works_routes.update_work(work["id"], WorkUpdate(card_ids=[], player_attributes={}))
+
+        self.assertEqual(retained["card_ids"], [first["id"], second["id"]])
+        self.assertEqual(retained["player_attributes"], {"体力": 80})
+        self.assertEqual(cleared_cards["card_ids"], [])
+        self.assertIsNone(cleared_cards["card_id"])
+        self.assertIsNone(cleared_cards["card"])
+        self.assertEqual(cleared_cards["cards"], [])
+        self.assertEqual(cleared_cards["player_attributes"], {})
+
+    def test_legacy_card_id_remains_compatible_and_explicit_null_clears_list(self):
+        card = self.create_card("旧接口")
+        work = works_routes.create_work(WorkCreate(title="旧剧本", card_id=card["id"]))
+        cleared = works_routes.update_work(work["id"], WorkUpdate(card_id=None))
+
+        self.assertEqual(work["card_ids"], [card["id"]])
+        self.assertEqual(work["card"]["id"], card["id"])
+        self.assertEqual(cleared["card_ids"], [])
+        self.assertIsNone(cleared["card_id"])
+
+    def test_missing_or_duplicate_card_ids_are_rejected_without_partial_update(self):
+        first = self.create_card("第一张")
+        second = self.create_card("第二张")
+        work = works_routes.create_work(WorkCreate(title="原始标题", card_ids=[first["id"]]))
+
+        with self.assertRaises(HTTPException) as missing:
+            works_routes.update_work(work["id"], WorkUpdate(title="不应写入", card_ids=[second["id"], 999999]))
+        with self.assertRaises(HTTPException) as duplicate:
+            works_routes.create_work(WorkCreate(title="重复", card_ids=[first["id"], first["id"]]))
+
+        self.assertEqual(missing.exception.status_code, 422)
+        self.assertEqual(missing.exception.detail["code"], "validation_error")
+        self.assertEqual(duplicate.exception.status_code, 422)
+        self.assertEqual(repositories.get_work(work["id"])["title"], "原始标题")
+        self.assertEqual(repositories.get_work(work["id"])["card_ids"], [first["id"]])
+
+    def test_invalid_player_attributes_are_rejected_as_a_non_object(self):
+        with self.assertRaises(ValidationError):
+            WorkCreate(title="无效属性", player_attributes=["体力", 80])
+
+    def test_legacy_work_without_association_rows_reads_as_one_card_list(self):
+        card = self.create_card("遗留卡")
+        work_id = database.execute("INSERT INTO works (title, card_id) VALUES (?, ?)", ("遗留剧本", card["id"]))
+
+        work = repositories.get_work(work_id)
+
+        self.assertEqual(work["card_ids"], [card["id"]])
+        self.assertEqual(work["cards"][0]["id"], card["id"])
+        self.assertEqual(work["card_id"], card["id"])
+
+    def test_deleting_any_position_reference_is_atomic(self):
+        first = self.create_card("首卡")
+        second = self.create_card("后卡")
+        work = works_routes.create_work(WorkCreate(title="受保护", card_ids=[first["id"], second["id"]]))
+
+        with self.assertRaises(repositories.CardReferenceConflict) as conflict:
+            repositories.delete_card(second["id"])
+
+        self.assertEqual(conflict.exception.works, [{"id": work["id"], "title": "受保护"}])
+        self.assertIsNotNone(repositories.get_card(second["id"]))
+        self.assertEqual(repositories.get_work(work["id"])["card_ids"], [first["id"], second["id"]])
+
+
+class MultiRoleCardConversationTests(unittest.TestCase):
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.tempdir.name) / "test.db"
+        self.db_patch = patch.object(database, "DB_PATH", self.db_path)
+        self.db_patch.start()
+        database.init_db()
+
+    def tearDown(self):
+        self.db_patch.stop()
+        self.tempdir.cleanup()
+
+    def create_card(self, name, persona):
+        return repositories.create_card({
+            "name": name,
+            "persona": persona,
+            "personality": f"{name} personality",
+            "speaking_style": f"{name} speaking style",
+            "relationships": {"player": f"{name} relationship"},
+            "directives": [f"{name} directive"],
+            "initial_state": {"attributes": {"legacy": 1}},
+            "character_attributes": {"mood": 50},
+        })
+
+    def test_new_conversation_snapshots_all_cards_in_order_and_uses_work_attributes(self):
+        first = self.create_card("first card", "first frozen persona")
+        second = self.create_card("second card", "second frozen persona")
+        work = repositories.create_work({
+            "title": "multi-card work",
+            "card_ids": [first["id"], second["id"]],
+            "player_attributes": {"stamina": 80},
+        })
+
+        conversation = repositories.create_conversation(work["id"], "snapshot session")
+
+        self.assertEqual(
+            [card["name"] for card in conversation["card_snapshots"]],
+            ["first card", "second card"],
+        )
+        self.assertEqual(conversation["card_snapshot"]["name"], "first card")
+        self.assertEqual(conversation["card_id"], first["id"])
+        self.assertEqual(repositories.get_state(conversation["id"])["attributes"], {"stamina": 80})
+        self.assertEqual(conversation["current_state"]["attributes"], {"stamina": 80})
+
+        repositories.update_card(first["id"], {"persona": "edited live persona"})
+        self.assertEqual(
+            repositories.get_conversation_cards(conversation)[0]["persona"],
+            "first frozen persona",
+        )
+
+    def test_snapshot_authority_survives_live_card_changes_and_new_sessions_use_current_order(self):
+        first = self.create_card("first card", "first frozen persona")
+        second = self.create_card("second card", "second frozen persona")
+        work = repositories.create_work({
+            "title": "multi-card work",
+            "card_ids": [first["id"], second["id"]],
+            "player_attributes": {"stamina": 80},
+        })
+        old_conversation = repositories.create_conversation(work["id"], "old session")
+
+        repositories.update_card(first["id"], {"persona": "first current persona"})
+        repositories.update_card(second["id"], {"persona": "second current persona"})
+        repositories.update_work(work["id"], {
+            "card_ids": [second["id"], first["id"]],
+            "player_attributes": {"stamina": 99},
+        })
+        new_conversation = repositories.create_conversation(work["id"], "new session")
+
+        old_prompt = adventure_engine.build_messages(old_conversation["id"])[0]["content"]
+        new_prompt = adventure_engine.build_messages(new_conversation["id"])[0]["content"]
+        self.assertLess(old_prompt.index("first frozen persona"), old_prompt.index("second frozen persona"))
+        self.assertNotIn("first current persona", old_prompt)
+        self.assertLess(new_prompt.index("second current persona"), new_prompt.index("first current persona"))
+        self.assertIn("second current persona", new_prompt)
+        self.assertEqual(repositories.get_state(new_conversation["id"])["attributes"], {"stamina": 99})
+
+        repositories.update_work(work["id"], {"card_ids": []})
+        repositories.delete_card(first["id"])
+        repositories.delete_card(second["id"])
+        self.assertIn("first frozen persona", adventure_engine.build_messages(old_conversation["id"])[0]["content"])
+        self.assertIn("second frozen persona", adventure_engine.build_messages(old_conversation["id"])[0]["content"])
+
+    def test_empty_work_creates_compatible_no_card_conversation(self):
+        work = repositories.create_work({"title": "no-card work", "player_attributes": {"luck": 7}})
+
+        conversation = repositories.create_conversation(work["id"], "no-card session")
+
+        self.assertEqual(conversation["card_snapshots"], [])
+        self.assertEqual(conversation["card_snapshot"], {})
+        self.assertIsNone(conversation["card_id"])
+        self.assertEqual(repositories.get_state(conversation["id"])["attributes"], {"luck": 7})
+        self.assertEqual(repositories.get_conversation_cards(conversation), [])
+        self.assertNotIn("角色卡：", adventure_engine.build_messages(conversation["id"])[0]["content"])
+
+        later_card = self.create_card("later card", "must not leak into this session")
+        repositories.update_work(work["id"], {"card_ids": [later_card["id"]]})
+        reloaded = repositories.get_conversation(conversation["id"])
+
+        self.assertEqual(reloaded["card_snapshots"], [])
+        self.assertEqual(reloaded["card_snapshot"], {})
+        self.assertEqual(repositories.get_conversation_cards(reloaded), [])
+        self.assertIsNone(repositories.get_conversation_card(reloaded))
+        self.assertNotIn(
+            "must not leak into this session",
+            adventure_engine.build_messages(conversation["id"])[0]["content"],
+        )
+
+    def test_no_card_snapshot_stays_empty_after_restart_and_cleans_marker_array(self):
+        work = repositories.create_work({"title": "restart-safe no-card work"})
+        conversation = repositories.create_conversation(work["id"], "restart-safe no-card session")
+
+        database.init_db()
+
+        reloaded = repositories.get_conversation(conversation["id"])
+        self.assertEqual(reloaded["card_snapshots"], [])
+        self.assertEqual(repositories.get_conversation_cards(reloaded), [])
+
+        database.execute(
+            "UPDATE conversations SET card_snapshots = ? WHERE id = ?",
+            (database.json_dumps([{"_conversation_card_snapshots_authoritative": True}]), conversation["id"]),
+        )
+        database.init_db()
+
+        cleaned = repositories.get_conversation(conversation["id"])
+        self.assertEqual(cleaned["card_snapshots"], [])
+        self.assertEqual(repositories.get_conversation_cards(cleaned), [])
+
+    def test_legacy_empty_snapshots_still_fall_back_to_live_work_cards(self):
+        card = self.create_card("legacy card", "live legacy persona")
+        work = repositories.create_work({
+            "title": "legacy fallback work",
+            "card_ids": [card["id"]],
+        })
+        conversation = repositories.create_conversation(work["id"], "legacy session")
+        database.execute(
+            "UPDATE conversations SET card_snapshot = ?, card_snapshots = ? WHERE id = ?",
+            (database.json_dumps({}), database.json_dumps([]), conversation["id"]),
+        )
+
+        reloaded = repositories.get_conversation(conversation["id"])
+
+        self.assertEqual(
+            [item["name"] for item in repositories.get_conversation_cards(reloaded)],
+            ["legacy card"],
+        )
+
+    def test_branch_copies_frozen_cards_and_current_player_attributes(self):
+        first = self.create_card("first card", "first frozen persona")
+        second = self.create_card("second card", "second frozen persona")
+        work = repositories.create_work({
+            "title": "branch work",
+            "card_ids": [first["id"], second["id"]],
+            "player_attributes": {"stamina": 80},
+        })
+        original = repositories.create_conversation(work["id"], "original")
+        repositories.save_state(original["id"], {"attributes": {"stamina": 66}})
+
+        branch = repositories.create_conversation_branch(original["id"], "branch", "alternate")
+
+        self.assertEqual(branch["parent_conversation_id"], original["id"])
+        self.assertEqual(branch["card_snapshots"], original["card_snapshots"])
+        self.assertEqual(repositories.get_state(branch["id"])["attributes"], {"stamina": 66})
+        repositories.update_card(first["id"], {"persona": "changed after branch"})
+        self.assertIn("first frozen persona", adventure_engine.build_messages(branch["id"])[0]["content"])
 
 
 if __name__ == "__main__":

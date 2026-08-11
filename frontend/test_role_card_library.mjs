@@ -29,11 +29,12 @@ test("role-card routes distinguish the library, new editor, and existing editor"
   assert.match(mainJs, /current\.name === "card"\) await renderCardEditor\(current\.id\)/);
 });
 
-test("script saves keep the selected role-card reference without synchronizing card content", () => {
+test("script saves keep ordered role-card references without synchronizing card content", () => {
   const saveStart = mainJs.indexOf("async function saveCreatorEdit");
   const bindStart = mainJs.indexOf("function bindCreatorEvents", saveStart);
   const creatorSave = mainJs.slice(saveStart, bindStart);
-  assert.match(creatorSave, /card_id: selectedCardId \? Number\(selectedCardId\) : null/);
+  assert.match(creatorSave, /card_ids: collectWorkCardIds\(\)/);
+  assert.match(creatorSave, /player_attributes: collectAttributeRows\("#player-attribute-rows"\)/);
   assert.doesNotMatch(creatorSave, /syncMockCard\(card/);
   assert.doesNotMatch(creatorSave, /api\("\/api\/cards"/);
   assert.doesNotMatch(creatorSave, /api\(`\/api\/cards\/\$\{/);
@@ -41,7 +42,7 @@ test("script saves keep the selected role-card reference without synchronizing c
 
 test("role-card library provides search, reference metadata, and CRUD actions", () => {
   assert.match(mainJs, /function referencedWorksForCard\(cardId, works\)/);
-  assert.match(mainJs, /Number\(work\.card_id\) === Number\(cardId\)/);
+  assert.match(mainJs, /workCardIds\(work\)\.includes\(Number\(cardId\)\)/);
   assert.match(mainJs, /async function renderCards\(\)/);
   assert.match(mainJs, /async function renderCardResults\(\)/);
   assert.match(mainJs, /id="card-library-search"/);
@@ -57,11 +58,11 @@ test("role-card library provides search, reference metadata, and CRUD actions", 
   assert.match(bindSource, /renderCardResults\(\)/);
 });
 
-test("independent role-card editor keeps role fields and future-session warning", () => {
+test("independent role-card editor keeps role fields, hidden legacy state, and future-session warning", () => {
   assert.match(mainJs, /async function renderCardEditor\(cardId = null\)/);
   assert.match(mainJs, /function fillCardForm\(card(?:, [^)]*)?\)/);
   assert.match(mainJs, /async function submitCardForm\(\)/);
-  for (const selector of ["card-name", "card-persona", "card-personality", "card-speaking", "directive-rows", "attribute-rows", "character-attribute-rows", "relation-rows"]) {
+  for (const selector of ["card-name", "card-persona", "card-personality", "card-speaking", "directive-rows", "character-attribute-rows", "relation-rows"]) {
     assert.match(mainJs, new RegExp(`id="${selector}"`));
   }
   assert.match(mainJs, /此角色卡已被 \$\{references\.length\} 个剧本引用，保存后会影响这些剧本之后新开的会话；已经开始的旧会话不会改变。/);
@@ -97,25 +98,26 @@ test("role-card cards show source and a personality-first summary", () => {
   assert.match(results, /来源：\$\{esc\(card\.source \|\| "未标注来源"\)\}/);
 });
 
-test("script editor selects an existing role card and submits card_id only", () => {
+test("script editor manages existing role cards and submits ordered ids", () => {
   const creatorStart = mainJs.indexOf("async function renderCreator");
   const creatorEnd = mainJs.indexOf("async function renderSettings", creatorStart);
   const creator = mainJs.slice(creatorStart, creatorEnd);
-  assert.match(creator, /id="work-card-id"/);
+  assert.match(creator, /id="work-card-rows"/);
   assert.match(creator, /不使用角色卡/);
-  assert.match(mainJs, /function populateWorkCardSelect\(/);
+  assert.match(mainJs, /function populateWorkCardRows\(/);
 
   const submitStart = mainJs.indexOf("async function submitCreatorForm");
   const submitEnd = mainJs.indexOf("function bindCreatorEvents", submitStart);
   const submit = mainJs.slice(submitStart, submitEnd);
-  assert.match(submit, /card_id/);
+  assert.match(submit, /card_ids/);
+  assert.match(submit, /player_attributes/);
   assert.doesNotMatch(submit, /api\("\/api\/cards"/);
   assert.doesNotMatch(submit, /api\(`\/api\/cards\/\$\{/);
 });
 
 test("script selector summary looks up the selected card and includes its personality or persona", () => {
   assert.match(mainJs, /let workCardOptions = \[\];/);
-  const populateStart = mainJs.indexOf("function populateWorkCardSelect");
+  const populateStart = mainJs.indexOf("function populateWorkCardRows");
   const fillStart = mainJs.indexOf("function fillCreatorForm", populateStart);
   const selector = mainJs.slice(populateStart, fillStart);
   assert.match(selector, /workCardOptions = cards;/);
@@ -133,7 +135,7 @@ test("script editor no longer embeds role-card or initial numeric-relation contr
   assert.doesNotMatch(creator, /add-initial-relation/);
 });
 
-test("script edit loading omits card mutation and adventure rendering prefers the conversation snapshot", () => {
+test("script edit loading omits card mutation and adventure rendering resolves ordered session cards", () => {
   const loadStart = mainJs.indexOf("async function loadCreatorEditData");
   const loadEnd = mainJs.indexOf("async function confirmCreatorEditSave", loadStart);
   const load = mainJs.slice(loadStart, loadEnd);
@@ -143,17 +145,19 @@ test("script edit loading omits card mutation and adventure rendering prefers th
   const adventureStart = mainJs.indexOf("async function renderAdventure");
   const adventureEnd = mainJs.indexOf("function openAdventureOnboarding", adventureStart);
   const adventure = mainJs.slice(adventureStart, adventureEnd);
-  assert.match(adventure, /cardSnapshot \|\| work\?\.card \|\| null/);
-  assert.match(adventure, /cardSnapshot \|\| \(work\?\.card_id \? await getCard\(work\.card_id\) : null\)/);
+  assert.match(adventure, /const cards = resolveSessionCards\(conv, work\);/);
+  assert.match(adventure, /session = \{ conv, work, cards, card: cards\[0\] \|\| null,/);
+  assert.match(adventure, /session-card-summary/);
 });
 
-test("an empty adventure card snapshot falls back while a populated snapshot stays authoritative", () => {
+test("adventure resolution gives the conversation snapshot array authority, including no-card sessions", () => {
   const adventureStart = mainJs.indexOf("async function renderAdventure");
   const adventureEnd = mainJs.indexOf("function openAdventureOnboarding", adventureStart);
   const adventure = mainJs.slice(adventureStart, adventureEnd);
-  assert.match(adventure, /const cardSnapshot = conv\.card_snapshot && Object\.keys\(conv\.card_snapshot\)\.length \? conv\.card_snapshot : null;/);
-  assert.match(adventure, /cardSnapshot \|\| work\?\.card \|\| null/);
-  assert.match(adventure, /cardSnapshot \|\| \(work\?\.card_id \? await getCard\(work\.card_id\) : null\)/);
+  assert.match(mainJs, /function resolveSessionCards\(conversation = \{\}, work = \{\}\)/);
+  assert.match(mainJs, /if \(Array\.isArray\(conversation\.card_snapshots\)\)/);
+  assert.match(mainJs, /return normalizeRoleCards\(conversation\.card_snapshots\);/);
+  assert.match(adventure, /cardSummaryText\(cards\)/);
 });
 
 test("Mock 新会话保存角色卡快照且后续编辑不覆盖旧会话", () => {
@@ -194,8 +198,8 @@ test("JSON imports preserve an existing card's hidden initial state", () => {
   const renderStart = mainJs.indexOf("async function renderCardEditor", bindStart);
   const bindings = mainJs.slice(bindStart, renderStart);
   assert.match(fill, /preserveHiddenInitialState = false/);
-  assert.match(fill, /\.\.\.cardEditorState\.initialState/);
-  assert.match(fill, /attributes: JSON\.parse\(JSON\.stringify\(card\.initial_state\?\.attributes \|\| \{\}\)\)/);
+  assert.match(fill, /JSON\.parse\(JSON\.stringify\(cardEditorState\.initialState \|\| \{\}\)\)/);
+  assert.doesNotMatch(fill, /card\.initial_state\?\.attributes/);
   assert.match(bindings, /preserveHiddenInitialState: Boolean\(cardEditorState\.cardId\)/);
 });
 
@@ -216,13 +220,14 @@ test("reference-sensitive role-card surfaces aggregate every cards and works pag
   assert.match(mainJs.slice(creatorStart, settingsStart), /await listAllCards\(\)/);
 });
 
-test("persona corrections use the role card resolved for the active session", () => {
+test("persona corrections use all role cards resolved for the active session", () => {
   const adventureStart = mainJs.indexOf("async function renderAdventure");
   const correctionStart = mainJs.indexOf("async function openCorrectionModal", adventureStart);
   const correctionEnd = mainJs.indexOf("function addDynamicRow", correctionStart);
   const adventure = mainJs.slice(adventureStart, correctionStart);
   const correction = mainJs.slice(correctionStart, correctionEnd);
-  assert.match(adventure, /session = \{ conv, work, card, messages, state, snapshots,/);
-  assert.match(correction, /const card = session\.card;/);
+  assert.match(adventure, /session = \{ conv, work, cards, card: cards\[0\] \|\| null,/);
+  assert.match(correction, /const cards = Array\.isArray\(session\.cards\)/);
+  assert.match(correction, /cards\.flatMap\(\(card\)/);
   assert.doesNotMatch(correction, /await getCard\(/);
 });

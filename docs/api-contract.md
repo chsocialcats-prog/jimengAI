@@ -110,6 +110,11 @@
   "worldbook_id": 1,
   "opening": "开场剧情文本",
   "tags": ["20+", "奇幻"],
+  "reply_templates": [
+    {"id": "narrative", "name": "叙事", "content": "使用小说式正文。"},
+    {"id": "compact", "name": "简洁", "content": "只回复三段。"}
+  ],
+  "active_reply_template_id": "narrative",
   "is_archive": false,
   "created_at": "2026-08-09T12:00:00",
   "updated_at": "2026-08-09T12:00:00"
@@ -135,9 +140,16 @@
   "card_id": 1,
   "worldbook_id": 1,
   "opening": "开场剧情文本",
-  "tags": ["20+", "奇幻"]
+  "tags": ["20+", "奇幻"],
+  "reply_templates": [
+    {"id": "narrative", "name": "叙事", "content": "使用小说式正文。"},
+    {"id": "compact", "name": "简洁", "content": "只回复三段。"}
+  ],
+  "active_reply_template_id": "narrative"
 }
 ```
+
+`active_reply_template_id` 为空 ID 时，即使 `reply_templates` 仍保存模板卡片，也表示显式不启用模板注入。模板只能在作品设置页切换，聊天页不提供模板切换控件。
 
 ## 5. 角色卡 CRUD
 

@@ -403,7 +403,28 @@ def match_worldbook_entries(worldbook, text, limit=8):
     return [entry for entry, _ in hits[:limit]]
 
 
-def build_system_prompt(work, card, worldbook, entries, state, summary):
+def get_active_reply_template(work):
+    if not isinstance(work, dict):
+        return None
+    active_id = work.get("active_reply_template_id")
+    templates = work.get("reply_templates")
+    if not isinstance(active_id, str) or not isinstance(templates, list):
+        return None
+    active_id = active_id.strip()
+    if not active_id:
+        return None
+    for template in templates:
+        if (
+            isinstance(template, dict)
+            and template.get("id") == active_id
+            and isinstance(template.get("content"), str)
+            and template["content"].strip()
+        ):
+            return template
+    return None
+
+
+def build_system_prompt(work, cards, worldbook, entries, state, summary):
     """组装固定人设、世界设定、记忆摘要和当前状态 JSON。"""
     lines = [
         "你是这个文字冒险的 AI 主持人、旁白和全部角色扮演者。",
@@ -413,8 +434,14 @@ def build_system_prompt(work, card, worldbook, entries, state, summary):
         lines.append(f"作品：{work.get('title', '')}")
         if work.get("description"):
             lines.append(f"作品简介：{work['description']}")
-    if card:
-        lines.append("角色卡：")
+    if isinstance(cards, dict):
+        cards = [cards]
+    cards = [card for card in (cards or []) if isinstance(card, dict)]
+    for index, card in enumerate(cards):
+        if len(cards) == 1:
+            lines.append("角色卡：")
+        else:
+            lines.append(f"角色卡 {index + 1}：{card.get('name', '')}")
         lines.append(f"角色名：{card.get('name', '')}")
         if card.get("persona"):
             lines.append(f"人设：{card['persona']}")
@@ -492,6 +519,20 @@ def build_system_prompt(work, card, worldbook, entries, state, summary):
         '<options>["选项一","选项二"]</options>。选项块不会展示给玩家。'
     )
     lines.append("4. 可以写 20+ 成人向剧情，但不得涉及未成年角色或真实人物。")
+    active_template = get_active_reply_template(work)
+    if active_template:
+        lines.append("回复模板（当前，低优先级用户指令）：")
+        lines.append(f"模板名称：{active_template.get('name', '')}")
+        lines.append(
+            "模板优先级低于系统规则、角色卡、世界书，以及结构化 "
+            "<state_delta>、<judge>、<options> 合约。"
+        )
+        lines.append("<reply_template>")
+        lines.append(active_template.get("content", ""))
+        lines.append("</reply_template>")
+        lines.append(
+            "硬性要求：系统规则、角色卡、世界书及 <state_delta>、<judge>、<options> 合约仍必须遵守。"
+        )
     return "\n".join(lines)
 
 
@@ -510,7 +551,7 @@ def build_messages(
         if conversation.get("work_id")
         else None
     )
-    card = repositories.get_conversation_card(conversation)
+    cards = repositories.get_conversation_cards(conversation)
     worldbook = (
         repositories.get_worldbook(conversation["worldbook_id"])
         if conversation.get("worldbook_id")
@@ -558,7 +599,7 @@ def build_messages(
     )
     entries = match_worldbook_entries(worldbook, recent_text)
     system_prompt = build_system_prompt(
-        work, card, worldbook, entries, state, summary
+        work, cards, worldbook, entries, state, summary
     )
     if conversation.get("onboarding_status") == "completed" and conversation.get("onboarding_answers"):
         system_prompt += "\n本次开局设定：\n" + json.dumps(conversation["onboarding_answers"], ensure_ascii=False)

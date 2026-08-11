@@ -19,12 +19,22 @@ def _get_work_or_404(work_id):
     return work
 
 
-def _validate_references(data):
-    if data.get("card_id") is not None and repositories.get_card(data["card_id"]) is None:
+def _validate_references(data, *, for_update=False):
+    try:
+        card_ids = repositories.normalize_card_ids(data, for_update=for_update)
+    except (TypeError, ValueError) as exc:
         raise HTTPException(
             status_code=422,
-            detail={"code": "validation_error", "message": "角色卡不存在"},
+            detail={"code": "validation_error", "message": str(exc)},
         )
+    if card_ids is not None:
+        data["card_ids"] = card_ids
+        for card_id in card_ids:
+            if repositories.get_card(card_id) is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": "validation_error", "message": "角色卡不存在"},
+                )
     if (
         data.get("worldbook_id") is not None
         and repositories.get_worldbook(data["worldbook_id"]) is None
@@ -48,7 +58,7 @@ def list_works(
 
 @router.post("", status_code=201, summary="创建作品")
 def create_work(payload: WorkCreate):
-    data = payload.model_dump()
+    data = payload.model_dump(exclude_none=True)
     if not data.get("title", "").strip():
         raise HTTPException(
             status_code=422,
@@ -77,7 +87,7 @@ def update_work(work_id: int, payload: WorkUpdate):
             status_code=422,
             detail={"code": "validation_error", "message": "作品标题不能为空"},
         )
-    _validate_references(data)
+    _validate_references(data, for_update=True)
     return repositories.update_work(work_id, data)
 
 
