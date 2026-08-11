@@ -20,7 +20,7 @@ function adventureRuntime({ conversation, workResult = null }) {
   const factory = new Function(
     "MODE", "api", "getWork", "getWorldbook", "getMessages", "getState", "getSnapshots",
     "resolveSessionCards", "cardSummaryText", "esc", "icon", "bindAdventureEvents",
-    "renderMessages", "renderSidebar", "setStreamingUi", "scrollMessages", "appEl", "$",
+    "renderMessages", "renderSidebar", "setStreamingUi", "scrollMessages", "REPLY_LENGTH_PRESETS", "loadReplyLength", "appEl", "$",
     `let session;\n${adventure}\nreturn { renderAdventure, getSession: () => session };`
   );
   const runtime = factory(
@@ -32,7 +32,7 @@ function adventureRuntime({ conversation, workResult = null }) {
     (conv, work) => Array.isArray(conv.card_snapshots) ? conv.card_snapshots : (work?.cards || []),
     (cards) => cards.map((card) => card.name).join(", "),
     (value) => String(value ?? ""), () => "",
-    () => {}, () => {}, () => {}, () => {}, () => {}, appEl,
+    () => {}, () => {}, () => {}, () => {}, () => {}, { detailed: { label: "详细", hint: "" } }, () => "detailed", appEl,
     (selector) => selector === "#back-btn" ? backButton : null,
   );
   return { runtime, calls, backButton };
