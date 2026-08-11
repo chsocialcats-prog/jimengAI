@@ -291,6 +291,10 @@ def _stream_ai_reply(conversation_id, stop_event, client_metadata=None):
             state_delta = adventure_engine.default_turn_state_delta(
                 state_service.get_state(conversation_id), latest_user_text
             )
+        if state_delta:
+            state_delta = state_service.sanitize_state_delta(
+                conversation_id, state_delta
+            ) or None
 
         if stopped:
             stop_marker = "\n（回复已停止）"
