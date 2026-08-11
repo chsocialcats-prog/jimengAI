@@ -47,11 +47,16 @@ test("keeps the widget runtime local and supports hybrid model sources", () => {
 test("adds layout rules for the local Widget", () => {
   assert.ok(styleSource.includes("body #waifu {"));
   assert.ok(styleSource.includes("z-index: 2;"));
+  assert.ok(styleSource.includes("right: 16px;"));
+  assert.ok(styleSource.includes("left: auto;"));
+  assert.ok(styleSource.includes("width: 240px !important;"));
+  assert.ok(styleSource.includes("height: 240px !important;"));
   assert.ok(styleSource.includes("bottom: 70px !important;"));
+  assert.ok(styleSource.includes("right: 8px;"));
   assert.ok(styleSource.includes("body #waifu-toggle {"));
   assert.ok(styleSource.includes("bottom: 76px !important;"));
   assert.ok(styleSource.includes("z-index: 71 !important;"));
-  assert.ok(styleSource.includes("width: min(220px, 58vw) !important;"));
-  assert.ok(styleSource.includes("height: min(220px, 58vw) !important;"));
-  assert.ok(styleSource.includes("width: min(220px, calc(100vw - 30px)) !important;"));
+  assert.ok(styleSource.includes("width: min(180px, 48vw) !important;"));
+  assert.ok(styleSource.includes("height: min(180px, 48vw) !important;"));
+  assert.ok(styleSource.includes("width: min(190px, calc(100vw - 30px)) !important;"));
 });
