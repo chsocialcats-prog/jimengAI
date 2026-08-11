@@ -4,7 +4,7 @@ import test from "node:test";
 
 const mainJs = fs.readFileSync(new URL("./js/main.js", import.meta.url), "utf8");
 const helperStart = mainJs.indexOf("const REPLY_LENGTH_PRESETS =");
-const helperEnd = mainJs.indexOf("\n\nmodalRoot?.addEventListener", helperStart);
+const helperEnd = mainJs.indexOf("modalRoot?.addEventListener", helperStart);
 assert.notEqual(helperStart, -1, "reply length helpers should be defined");
 assert.notEqual(helperEnd, -1, "reply length helper block should be complete");
 const helperSource = mainJs.slice(helperStart, helperEnd);
