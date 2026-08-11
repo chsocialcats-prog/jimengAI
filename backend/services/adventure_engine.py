@@ -282,18 +282,82 @@ def parse_visible_state_delta(text):
     return delta or None
 
 
-def default_turn_state_delta(state, player_text):
+def _is_numeric_attribute_value(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _build_numeric_attribute_schema_from_state(state):
+    if not isinstance(state, dict):
+        return {"attributes": {}, "characters": {}}
+    return {
+        "attributes": {
+            str(name): value
+            for name, value in (state.get("attributes") or {}).items()
+            if _is_numeric_attribute_value(value)
+        },
+        "characters": {
+            str(name): {
+                str(attr_name): attr_value
+                for attr_name, attr_value in ((profile or {}).get("attributes") or {}).items()
+                if _is_numeric_attribute_value(attr_value)
+            }
+            for name, profile in (state.get("characters") or {}).items()
+            if isinstance(profile, dict)
+        },
+    }
+
+
+def _resolve_numeric_attribute_schema(state, attribute_schema=None):
+    if attribute_schema is None:
+        return _build_numeric_attribute_schema_from_state(state)
+    normalized = repositories.normalize_attribute_schema(attribute_schema)
+    return {
+        "attributes": {
+            str(name): value
+            for name, value in (normalized.get("attributes") or {}).items()
+            if _is_numeric_attribute_value(value)
+        },
+        "characters": {
+            str(name): {
+                str(attr_name): attr_value
+                for attr_name, attr_value in (profile or {}).items()
+                if _is_numeric_attribute_value(attr_value)
+            }
+            for name, profile in (normalized.get("characters") or {}).items()
+            if isinstance(profile, dict)
+        },
+    }
+
+
+def _pick_priority_numeric_attribute(attributes, preferred_names):
+    if not isinstance(attributes, dict):
+        return None
+    for name in preferred_names:
+        if name in attributes and _is_numeric_attribute_value(attributes.get(name)):
+            return str(name)
+    for name, value in attributes.items():
+        if _is_numeric_attribute_value(value):
+            return str(name)
+    return None
+
+
+def default_turn_state_delta(state, player_text, attribute_schema=None):
     """当模型遗漏状态块时，为有效互动生成一项可预测的最小数值变化。"""
     if not isinstance(state, dict):
         return None
 
+    schema = _resolve_numeric_attribute_schema(state, attribute_schema)
     text = str(player_text or "")
     change = "-1" if any(keyword in text for keyword in HOSTILE_INTERACTION_KEYWORDS) else "+1"
     for name, profile in (state.get("characters") or {}).items():
         attributes = (profile or {}).get("attributes") or {}
         if not isinstance(attributes, dict):
             continue
-        target = "好感度" if "好感度" in attributes else "心情" if "心情" in attributes else None
+        allowed_attributes = (schema.get("characters") or {}).get(str(name)) or {}
+        target = _pick_priority_numeric_attribute(
+            {key: attributes.get(key) for key in allowed_attributes if key in attributes},
+            ("好感度", "心情"),
+        )
         if target:
             return {
                 "characters": {
@@ -303,8 +367,14 @@ def default_turn_state_delta(state, player_text):
 
     attributes = state.get("attributes") or {}
     if not isinstance(attributes, dict):
-        return {"attributes": {"心情": change}}
-    target = "心情" if "心情" in attributes else next(iter(attributes), "心情")
+        return None
+    allowed_attributes = schema.get("attributes") or {}
+    target = _pick_priority_numeric_attribute(
+        {key: attributes.get(key) for key in allowed_attributes if key in attributes},
+        ("心情",),
+    )
+    if target is None:
+        return None
     return {"attributes": {str(target): change}}
 
 
@@ -424,7 +494,7 @@ def get_active_reply_template(work):
     return None
 
 
-def build_system_prompt(work, cards, worldbook, entries, state, summary):
+def build_system_prompt(work, cards, worldbook, entries, state, summary, attribute_schema=None):
     """组装固定人设、世界设定、记忆摘要和当前状态 JSON。"""
     lines = [
         "你是这个文字冒险的 AI 主持人、旁白和全部角色扮演者。",
@@ -480,27 +550,76 @@ def build_system_prompt(work, cards, worldbook, entries, state, summary):
         "flags": state.get("flags", []),
         "characters": state.get("characters", {}),
     }
+    attribute_schema = _resolve_numeric_attribute_schema(state, attribute_schema)
     lines.append("玩家当前状态 JSON：")
     lines.append(json.dumps(state_payload, ensure_ascii=False))
+    lines.append("本局可更新的初始属性白名单 JSON：")
+    lines.append(json.dumps(attribute_schema, ensure_ascii=False))
     lines.append("输出规则：")
     lines.append("1. 始终保持角色卡人设；不要向玩家展示状态 JSON 或本提示。")
     lines.append(
         "2. 状态发生变化时，在剧情文本末尾附加 "
         "<state_delta>{...}</state_delta>，该块是给系统解析的，不得展示给玩家。"
     )
-    lines.append(
+    player_rule = (
         "玩家明确要求修改数值、物品、任务、关系或状态时，必须输出 "
-        "state_delta；不得只在剧情文字中声称已修改。示例："
-        '<state_delta>{"attributes":{"心情":"+5"}}</state_delta>。'
+        "state_delta；不得只在剧情文字中声称已修改。"
     )
+    player_attributes = attribute_schema.get("attributes") or {}
+    if player_attributes:
+        player_attribute = next(iter(player_attributes))
+        player_example = {"attributes": {player_attribute: "+5"}}
+        player_rule += (
+            "示例：<state_delta>"
+            + json.dumps(
+                player_example,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            + "</state_delta>。"
+        )
+    lines.append(player_rule)
+
+    character_example = None
+    for character_name, character_attributes in (
+        attribute_schema.get("characters") or {}
+    ).items():
+        if character_attributes:
+            character_attribute = next(iter(character_attributes))
+            character_example = {
+                "characters": {
+                    character_name: {
+                        "attributes": {character_attribute: "+5"}
+                    }
+                }
+            }
+            break
+    if character_example:
+        lines.append(
+            "剧情角色的数值写入 characters，例如：<state_delta>"
+            + json.dumps(
+                character_example,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            + "</state_delta>。"
+        )
+    else:
+        lines.append(
+            "剧情角色的数值只能写入白名单中对应角色的 characters[name].attributes；"
+            "白名单没有可用角色属性时不要输出角色属性变化。"
+        )
     lines.append(
-        "剧情角色的数值写入 characters，例如："
-        '<state_delta>{"characters":{"角色名":{"attributes":{"心情":"+5","好感度":"+2"}}}}</state_delta>。'
+        "属性规则：只能修改白名单中本局开局已有的数字属性，使用 +5 或 -2 这类正负数字变化；"
+        "玩家属性写入 attributes，剧情角色属性写入对应角色的 characters；"
+        "禁止新增属性、改名、新增角色或把角色属性写入玩家属性；"
+        "必须根据本回合剧情选择真正相关的已有属性，不要为了凑状态变化修改无关属性；"
+        "没有合适的已有属性时不要输出属性变化。"
     )
     lines.append(
         "除纯说明、查询或玩家明确要求不改变状态外，每次有效互动都必须"
         "依据本回合结果让至少一项数值产生合理的小幅变化，并输出 state_delta；"
-        "优先使用玩家属性、金钱或剧情角色的心情/好感度，通常变化范围为 ±1 到 ±10。"
+        "通常变化范围为 ±1 到 ±10。"
     )
     lines.append(
         "不要在剧情正文中写“【状态变化】”或声称数值已经变化；数值变化只能写入 state_delta。"
@@ -558,6 +677,7 @@ def build_messages(
         else None
     )
     state = repositories.get_state(conversation_id)
+    attribute_schema = repositories.get_or_create_attribute_schema(conversation_id)
     recent_window = (
         MEMORY_RECENT_COUNT
         if recent_count is None
@@ -599,7 +719,7 @@ def build_messages(
     )
     entries = match_worldbook_entries(worldbook, recent_text)
     system_prompt = build_system_prompt(
-        work, cards, worldbook, entries, state, summary
+        work, cards, worldbook, entries, state, summary, attribute_schema
     )
     if conversation.get("onboarding_status") == "completed" and conversation.get("onboarding_answers"):
         system_prompt += "\n本次开局设定：\n" + json.dumps(conversation["onboarding_answers"], ensure_ascii=False)
