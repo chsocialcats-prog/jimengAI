@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 .superpowers/
+.worktrees/
 node_modules/
 .env
 .env.*
