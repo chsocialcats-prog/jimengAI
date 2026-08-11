@@ -25,6 +25,15 @@ class StateDeltaDisplayTests(unittest.TestCase):
             "- 移除状态：淋湿",
         )
 
+    def test_empty_filtered_delta_has_no_player_facing_summary(self):
+        self.assertEqual(state_service.format_state_delta_for_player({}), "")
+        self.assertEqual(
+            state_service.format_state_delta_for_player(
+                {"attributes": {}, "characters": {}}
+            ),
+            "",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
