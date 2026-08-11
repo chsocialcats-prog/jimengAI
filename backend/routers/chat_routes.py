@@ -270,6 +270,53 @@ def _stream_ai_reply(conversation_id, stop_event, client_metadata=None):
             emitted += tail
             yield sse("delta", {"content": tail})
 
+        minimum_characters = int(reply_settings.get("min_characters", 0))
+        current_characters = reply_length.count_reply_characters(emitted)
+        if (
+            minimum_characters
+            and current_characters < minimum_characters
+            and not stopped
+            and config.get("deepseek", {}).get("api_key")
+        ):
+            continuation_messages = [
+                *messages,
+                {"role": "assistant", "content": emitted},
+                {
+                    "role": "user",
+                    "content": (
+                        f"上一段可见正文只有 {current_characters} 个字，未达到最低 {minimum_characters} 个字。"
+                        f"请只补写新增剧情正文，使整段回复达到 {minimum_characters} 至 "
+                        f"{reply_settings.get('max_characters', minimum_characters)} 个可见中文字符；"
+                        "不要重复上一段，不要输出 XML、JSON、选项或元数据，未达到最低字数前不要结束。"
+                    ),
+                },
+            ]
+            continuation_filter = adventure_engine.StructuredOutputFilter()
+            continuation_stream = client.stream_chat(
+                continuation_messages,
+                max_tokens=reply_settings["max_tokens"],
+            )
+            for event in continuation_stream:
+                if stop_event.is_set():
+                    stopped = True
+                    break
+                if event["type"] == "usage":
+                    usage = event.get("usage")
+                elif event["type"] == "delta":
+                    chunk = event.get("content") or ""
+                    if not chunk:
+                        continue
+                    visible = continuation_filter.feed(chunk)
+                    if visible:
+                        emitted += visible
+                        yield sse("delta", {"content": visible})
+            continuation_tail, _, _, continuation_options = continuation_filter.finish()
+            if continuation_tail:
+                emitted += continuation_tail
+                yield sse("delta", {"content": continuation_tail})
+            if not options and continuation_options:
+                options = continuation_options
+
         latest_user_text = next(
             (
                 message.get("content", "")

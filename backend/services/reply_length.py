@@ -7,6 +7,9 @@ DEFAULT_REPLY_LENGTH = "detailed"
 REPLY_LENGTH_PRESETS = {
     "short": {
         "max_tokens": 1024,
+        "min_characters": 300,
+        "max_characters": 500,
+        "minimum_instruction": "本轮回复的可见正文不得少于 300 个中文字符，未达到最低字数前不要结束。",
         "label": "简短",
         "instruction": (
             "本轮剧情回复以约 300-500 个中文字符为目标，快速推进事件，"
@@ -15,6 +18,9 @@ REPLY_LENGTH_PRESETS = {
     },
     "standard": {
         "max_tokens": 2048,
+        "min_characters": 600,
+        "max_characters": 1000,
+        "minimum_instruction": "本轮回复的可见正文不得少于 600 个中文字符，未达到最低字数前不要结束。",
         "label": "标准",
         "instruction": (
             "本轮剧情回复以约 600-1000 个中文字符为目标，平衡环境描写、"
@@ -23,6 +29,9 @@ REPLY_LENGTH_PRESETS = {
     },
     "detailed": {
         "max_tokens": 4096,
+        "min_characters": 1000,
+        "max_characters": 1800,
+        "minimum_instruction": "本轮回复的可见正文不得少于 1000 个中文字符，尽量控制在 1800 个以内；未达到最低字数前不要结束，请继续补充必要的环境、感官、动作、对话和结果。",
         "label": "详细",
         "instruction": (
             "本轮剧情回复以约 1000-1800 个中文字符为目标，完整展开环境、"
@@ -31,6 +40,9 @@ REPLY_LENGTH_PRESETS = {
     },
     "long": {
         "max_tokens": 8192,
+        "min_characters": 2000,
+        "max_characters": 3500,
+        "minimum_instruction": "本轮回复的可见正文不得少于 2000 个中文字符，尽量控制在 3500 个以内；未达到最低字数前不要结束，请继续补充完整的场景、动作、对话、情绪、因果和后续悬念。",
         "label": "超长",
         "instruction": (
             "本轮剧情回复以约 2000-3500 个中文字符为目标，充分展开场景、"
@@ -38,6 +50,19 @@ REPLY_LENGTH_PRESETS = {
         ),
     },
 }
+
+
+def count_reply_characters(text):
+    """Count visible reply characters while ignoring whitespace."""
+    return sum(1 for char in str(text or "") if not char.isspace())
+
+
+def _full_instruction(preset):
+    return " ".join(
+        part
+        for part in (preset.get("instruction", ""), preset.get("minimum_instruction", ""))
+        if part
+    )
 
 
 def resolve_reply_length(metadata, fallback_max_tokens):
@@ -49,12 +74,16 @@ def resolve_reply_length(metadata, fallback_max_tokens):
         return {
             "key": None,
             "max_tokens": int(fallback_max_tokens),
+            "min_characters": 0,
+            "max_characters": 0,
             "instruction": "",
         }
     return {
         "key": key,
         "max_tokens": int(preset["max_tokens"]),
-        "instruction": preset["instruction"],
+        "min_characters": int(preset["min_characters"]),
+        "max_characters": int(preset["max_characters"]),
+        "instruction": _full_instruction(preset),
     }
 
 
@@ -71,7 +100,7 @@ def append_reply_length_instruction(messages, reply_length):
         content = str(message.get("content", ""))
         copied[index] = {
             **message,
-            "content": f"{content}\n\n回复长度偏好：{preset['instruction']}",
+            "content": f"{content}\n\n回复长度偏好：{_full_instruction(preset)}",
         }
         break
     return copied

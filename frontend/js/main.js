@@ -96,7 +96,9 @@ function formatTime(value) {
 }
 
 function nowISO() {
-  return new Date().toISOString().slice(0, 19).replace("T", " ");
+  const date = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())} ${p(date.getHours())}:${p(date.getMinutes())}:${p(date.getSeconds())}`;
 }
 
 function clamp(value, min = 0, max = 100) {
@@ -1457,11 +1459,24 @@ function messageTextHtml(content) {
   }).join("\n");
 }
 
+function replyCharacterCount(content) {
+  return Array.from(String(content || ""))
+    .filter((char) => !/\s/u.test(char))
+    .length;
+}
+
+function messageMetaHtml(message) {
+  if (message?.role !== "assistant" && message?.role !== "ai") return "";
+  if (!message?.created_at || !String(message.content || "").trim()) return "";
+  return `<div class="message-meta"><span>${esc(formatTime(message.created_at))}</span><span>${replyCharacterCount(message.content)} 字</span></div>`;
+}
+
 function messageHtml(message) {
   const role = message.role === "user" ? "user" : message.role === "system" ? "system" : "ai";
   const label = role === "user" ? "你" : role === "system" ? "系统" : "AI";
   const options = role === "ai" ? messageOptionsHtml(message.content, message.metadata?.options || []) : "";
-  return `<div class="message ${role}" data-message-id="${esc(message.id || "")}"><span class="message-label">${label}</span><span class="message-text">${messageTextHtml(message.content)}</span>${options}</div>`;
+  const meta = role === "ai" ? messageMetaHtml(message) : "";
+  return `<div class="message ${role}" data-message-id="${esc(message.id || "")}"><span class="message-label">${label}</span><span class="message-text">${messageTextHtml(message.content)}</span>${options}${meta}</div>`;
 }
 
 function renderMessages() {
@@ -1651,15 +1666,17 @@ async function sendMessage(content) {
     },
     onFinish: async () => {
       if (session !== activeSession) return;
+      let assistantMessage = null;
       if (acc.trim()) {
-        session.messages.push({
+        assistantMessage = {
           id: `local-${Date.now()}-${Math.random()}`,
           role: "assistant",
           content: acc,
           metadata: { options: streamOptions },
           created_at: nowISO(),
-        });
-        messageText.innerHTML = messageTextHtml(acc);
+        };
+        session.messages.push(assistantMessage);
+        messageText.innerHTML = messageTextHtml(assistantMessage.content);
       } else {
         messageText.textContent = "（没有收到回复）";
       }
@@ -1674,6 +1691,9 @@ async function sendMessage(content) {
       if (options && message) {
         message.insertAdjacentHTML("beforeend", options);
         bindMessageOptionEvents(messageText.closest(".message"));
+      }
+      if (assistantMessage && message) {
+        message.insertAdjacentHTML("beforeend", messageMetaHtml(assistantMessage));
       }
       setStreamingUi(false);
       scrollMessages();

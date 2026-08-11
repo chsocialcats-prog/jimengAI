@@ -7,12 +7,16 @@
   "deepseek": {
     "base_url": "https://api.deepseek.com",
     "model": "deepseek-v4-flash",
-    "api_key": "",
+    "api_key": "sk-6083a3780ad74c39aaa009e115d361f2",
     "timeout_seconds": 60
   },
   "generation": {
     "temperature": 0.8,
-    "max_tokens": 2048,
-    "reasoning_effort": "high"
+    "max_tokens": 4096,
+    "reasoning_effort": "high",
+    "context_window_tokens": 32768,
+    "compression_trigger_ratio": 0.75,
+    "compression_keep_recent_messages": 8,
+    "compression_summary_max_tokens": 1200
   }
 }

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tests for forwarding a selected reply length through the chat stream."""
 
+import json
 import threading
 import unittest
 from types import SimpleNamespace
@@ -120,6 +121,39 @@ class ChatReplyLengthTests(unittest.TestCase):
         list(chat_routes._stream_ai_reply(7, self.stop_event, {}))
 
         self.assertIsNone(self.client.calls[0]["max_tokens"])
+
+    def test_short_detailed_reply_gets_one_continuation_request(self):
+        class ShortThenLongClient:
+            def __init__(self):
+                self.calls = []
+
+            def stream_chat(self, messages, max_tokens=None):
+                self.calls.append({"messages": messages, "max_tokens": max_tokens})
+                if len(self.calls) == 1:
+                    yield {"type": "delta", "content": "短回复"}
+                else:
+                    yield {"type": "delta", "content": "补" * 1000}
+                yield {"type": "finish", "finish_reason": "stop"}
+
+        client = ShortThenLongClient()
+        with patch.object(chat_routes, "create_client", return_value=client):
+            events = list(
+                chat_routes._stream_ai_reply(
+                    7,
+                    self.stop_event,
+                    {"reply_length": "detailed"},
+                )
+            )
+
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(client.calls[1]["messages"][-2]["role"], "assistant")
+        self.assertEqual(client.calls[1]["messages"][-2]["content"], "短回复")
+        deltas = [
+            json.loads(event.split("data: ", 1)[1])["content"]
+            for event in events
+            if event.startswith("event: delta")
+        ]
+        self.assertGreaterEqual(sum(len(delta) for delta in deltas), 1000)
 
     def test_stream_chat_passes_client_metadata_to_ai_reply(self):
         metadata = {"reply_length": "short"}

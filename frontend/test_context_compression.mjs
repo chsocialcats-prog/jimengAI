@@ -92,7 +92,10 @@ test("sendMessage maps context statuses and restores the normal header", async (
     streaming: false,
     hasUnsavedProgress: false,
   };
-  const messageNode = { classList: { remove: () => {} } };
+  const messageNode = {
+    classList: { remove: () => {} },
+    insertAdjacentHTML: () => {},
+  };
   const messageText = {
     textContent: "",
     innerHTML: "",
@@ -126,6 +129,7 @@ test("sendMessage maps context statuses and restores the normal header", async (
     "messageOptionsHtml",
     "bindMessageOptionEvents",
     "messageTextHtml",
+    "messageMetaHtml",
     "nowISO",
     "toast",
     "setTimeout",
@@ -149,6 +153,7 @@ test("sendMessage maps context statuses and restores the normal header", async (
     () => "",
     () => {},
     () => "reply",
+    () => "",
     () => "2026-08-10 00:00:00",
     () => {},
     (callback, delay) => {
