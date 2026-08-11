@@ -2401,30 +2401,30 @@ async function submitCardForm() {
 
 function roleCardJsonFormatHtml() {
   const example = `{
-  "name": "???",
-  "persona": "???????????????",
-  "personality": "????????",
-  "speaking_style": "???????????",
-  "relationships": { "??": "????????" },
-  "directives": ["????????", "????????"],
+  "name": "角色名",
+  "persona": "身份、经历、行为动机和核心人设",
+  "personality": "谨慎、嘴硬、重情",
+  "speaking_style": "语气、常用词与说话节奏",
+  "relationships": { "玩家": "与玩家的关系描述" },
+  "directives": ["始终保持角色人设", "不要替玩家做决定"],
   "initial_state": {
-    "attributes": { "??": 60, "??": 40 },
+    "attributes": { "魅力": 60, "武力": 40 },
     "items": [],
     "relations": {},
     "money": 100,
     "quests": [],
     "flags": []
   },
-  "character_attributes": { "??": 50, "???": 0 },
+  "character_attributes": { "心情": 50, "好感度": 0 },
   "source": "local"
 }`;
   return `
-    <h2>??? JSON ??</h2>
-    <p>? <code>name</code> ?????????????????</p>
-    <p><code>persona</code>?<code>personality</code>?<code>speaking_style</code> ???????<code>relationships</code>?<code>directives</code>?<code>initial_state</code> ? <code>character_attributes</code> ??????????????<code>source</code> ?????</p>
-    <p>???????????????? <code>{ "card": { ... } }</code> ???<code>id</code>?<code>created_at</code> ? <code>updated_at</code> ??????<code>world</code> ? <code>opening</code> ???????????</p>
+    <h2>角色卡 JSON 格式</h2>
+    <p>仅 <code>name</code> 为必填字段；其余字段可按需要省略。</p>
+    <p><code>persona</code>、<code>personality</code>、<code>speaking_style</code> 用于描述角色；<code>relationships</code>、<code>directives</code>、<code>initial_state</code> 和 <code>character_attributes</code> 可补充关系、指令与初始状态，<code>source</code> 标记来源。</p>
+    <p>导入时可直接使用角色对象，也接受 <code>{ "card": { ... } }</code> 包装。<code>id</code>、<code>created_at</code> 和 <code>updated_at</code> 是响应字段；<code>world</code> 与 <code>opening</code> 属于作品／世界书配置。</p>
     <pre class="json-format-example"><code>${esc(example)}</code></pre>
-    <div class="modal-actions"><button class="btn btn-primary" type="button" data-close>??</button></div>
+    <div class="modal-actions"><button class="btn btn-primary" type="button" data-close>关闭</button></div>
   `;
 }
 
@@ -2492,7 +2492,7 @@ async function renderCardEditor(cardId = null) {
     <div class="page">
       <div class="page-head">
         <div><h1 class="page-title">${isEditing ? "编辑角色卡" : "创建角色卡"}</h1><p class="page-subtitle">角色卡独立于剧本维护，可被多个剧本复用。</p></div>
-        <div class="detail-actions"><input id="card-file" class="input card-file-input" type="file" accept=".json,application/json"><button class="btn btn-ghost" type="button" id="card-editor-back">${icon("arrow-left")} 返回角色卡库</button></div>
+        <div class="detail-actions"><input id="card-file" class="input card-file-input" type="file" accept=".json,application/json"><button class="btn btn-ghost" type="button" id="card-json-format-btn">${icon("info")} JSON 格式</button><button class="btn btn-ghost" type="button" id="card-editor-back">${icon("arrow-left")} 返回角色卡库</button></div>
       </div>
       <p id="card-load-error" class="notice" hidden></p>
       <p id="card-reference-warning" class="notice" hidden></p>
