@@ -55,6 +55,27 @@ class OptionOutputTests(unittest.TestCase):
             ["观察门锁", "敲门", "离开"],
         )
 
+    def test_bare_bullets_are_extracted_before_fallback(self):
+        narrative = (
+            "她注视着你，只等着你给出自己的选择。\n\n"
+            "- 问塞西莉亚：那本笔记究竟记录了怎样的内容，为什么必须被封锁？\n"
+            "- 决定签下保密契约，跟她进入东区禁书区\n"
+            "- 先问她：你有没有亲眼见过实际存在的那本笔记？\n"
+            "- 微笑承认自己梦里还见到过某种仪式，问她是否听说过“复苏教团”\n\n"
+            "【状态变化】\n"
+            "- 塞西莉亚·好感度 +2"
+        )
+
+        self.assertEqual(
+            adventure_engine.parse_visible_options(narrative),
+            [
+                "问塞西莉亚：那本笔记究竟记录了怎样的内容，为什么必须被封锁？",
+                "决定签下保密契约，跟她进入东区禁书区",
+                "先问她：你有没有亲眼见过实际存在的那本笔记？",
+                "微笑承认自己梦里还见到过某种仪式，问她是否听说过“复苏教团”",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

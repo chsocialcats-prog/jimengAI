@@ -319,24 +319,39 @@ def default_turn_options(narrative, player_text):
 
 
 def parse_visible_options(text):
-    """兼容模型仍输出的可见“选项：”列表，供结构化选项缺失时使用。
+    """兼容模型仍输出的可见选项列表，供结构化选项缺失时使用。
 
     新提示要求模型输出 ``<options>``，但已有模型或旧对话可能仍使用
-    ``选项：`` 加项目符号/编号。只读取标题后的连续行动项，并在状态块
+    ``选项：`` 加项目符号/编号，也可能直接输出无标题的项目符号列表。
+    只读取标题后的连续行动项，或至少包含两项的无标题候选组，并在状态块
     或其他正文出现时停止，避免把叙事中的普通列表误当成按钮。
     """
     if not isinstance(text, str) or not text:
         return None
 
     options = []
+    implicit_groups = []
+    implicit_options = []
     collecting = False
 
-    def add(value):
+    def normalize(value):
         value = re.sub(r"^[-•·*]\s*", "", value.strip())
         value = re.sub(r"^\d+[.)、．]\s*", "", value).strip()
-        value = value.strip("\"“”'‘’")
-        if value and value not in options:
-            options.append(value)
+        for opening, closing in (("\"", "\""), ("“", "”"), ("'", "'"), ("‘", "’")):
+            if value.startswith(opening) and value.endswith(closing):
+                value = value[1:-1].strip()
+                break
+        return value
+
+    def add(value, target):
+        value = normalize(value)
+        if value and value not in target:
+            target.append(value)
+
+    def flush_implicit():
+        if len(implicit_options) >= 2:
+            implicit_groups.append(implicit_options[:4])
+        implicit_options.clear()
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -344,33 +359,49 @@ def parse_visible_options(text):
             if collecting and options:
                 # 允许列表项之间有空行，但不要跨越到下一段正文。
                 continue
+            if implicit_options:
+                # 无标题列表也允许项目之间出现空行。
+                continue
             continue
 
         normalized = re.sub(r"^\*+|\*+$", "", line).strip()
+        if normalized in ("【状态变化】", "状态变化：", "状态变化:"):
+            flush_implicit()
+            break
+
         heading = re.match(
             r"^(?:#{1,3}\s*)?(?:选项|可选行动|行动)\s*[:：]?\s*(.*)$",
             normalized,
         )
         if heading:
+            flush_implicit()
             collecting = True
             inline = heading.group(1).strip()
             if inline:
                 for piece in re.split(r"\s*(?=(?:\d+[.)、．]|[-•·*])\s+)", inline):
-                    add(piece)
+                    add(piece, options)
             continue
 
-        if collecting and normalized in ("【状态变化】", "状态变化：", "状态变化:"):
-            break
         item = re.match(r"^(?:[-•·*]|\d+[.)、．])\s*(.+)$", normalized)
-        if collecting and item:
-            add(item.group(1))
-            if len(options) >= 4:
-                break
+        if item:
+            if collecting:
+                add(item.group(1), options)
+                if len(options) >= 4:
+                    break
+            else:
+                add(item.group(1), implicit_options)
             continue
+
         if collecting:
             break
+        flush_implicit()
 
-    return options[:4] or None
+    flush_implicit()
+    if options:
+        return options[:4]
+    if implicit_groups:
+        return implicit_groups[-1]
+    return None
 
 
 def match_worldbook_entries(worldbook, text, limit=8):
