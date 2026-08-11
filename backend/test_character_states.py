@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import unittest
+from unittest.mock import patch
 
 from backend import repositories
 from backend.services import state_service
@@ -101,6 +102,160 @@ class CharacterStateTests(unittest.TestCase):
         self.assertEqual(updated["characters"]["温执"]["attributes"], {"好感": 7.0, "称呼": "同学"})
         self.assertNotIn("陌生角色", updated["characters"])
         self.assertEqual(changed, {"attributes", "characters"})
+
+    def test_filter_state_delta_does_not_mutate_input(self):
+        current = repositories.normalize_state({
+            "attributes": {"学业": 60},
+            "characters": {"温执": {"attributes": {"心情": 50}, "flags": []}},
+        })
+        delta = {
+            "attributes": {"学业": "+5", "体力": "+10"},
+            "characters": {
+                "温执": {"attributes": {"心情": "-2", "魅力": "+3"}},
+            },
+            "money": "+10",
+        }
+        current_before = repositories.normalize_state({
+            "attributes": {"学业": 60},
+            "characters": {"温执": {"attributes": {"心情": 50}, "flags": []}},
+        })
+        delta_before = {
+            "attributes": {"学业": "+5", "体力": "+10"},
+            "characters": {
+                "温执": {"attributes": {"心情": "-2", "魅力": "+3"}},
+            },
+            "money": "+10",
+        }
+
+        filtered = state_service.filter_state_delta(
+            current,
+            delta,
+            attribute_schema={
+                "attributes": {"学业": 60},
+                "characters": {"温执": {"心情": 50}},
+            },
+        )
+
+        self.assertEqual(current, current_before)
+        self.assertEqual(delta, delta_before)
+        self.assertEqual(
+            filtered,
+            {
+                "attributes": {"学业": "+5"},
+                "characters": {"温执": {"attributes": {"心情": "-2"}}},
+                "money": "+10",
+            },
+        )
+
+    def test_apply_state_delta_uses_conversation_schema_and_drops_illegal_attributes_before_save(self):
+        current = repositories.normalize_state({
+            "attributes": {"学业": 60, "说明": "学生"},
+            "characters": {"温执": {"attributes": {"心情": 50}, "flags": []}},
+        })
+        schema = {
+            "attributes": {"学业": 60, "说明": "学生"},
+            "characters": {"温执": {"心情": 50}},
+        }
+
+        with patch("backend.services.state_service.get_state", return_value=current), patch(
+            "backend.services.state_service.repositories.get_or_create_attribute_schema",
+            return_value=schema,
+        ) as mock_schema, patch(
+            "backend.services.state_service.repositories.save_state"
+        ) as mock_save:
+            mock_save.side_effect = lambda conversation_id, state: state
+
+            saved = state_service.apply_state_delta(
+                123,
+                {
+                    "attributes": {"学业": "+5", "体力": "+10"},
+                    "characters": {
+                        "温执": {"attributes": {"心情": "-2", "魅力": "+3"}},
+                        "陌生角色": {"attributes": {"心情": "+9"}},
+                    },
+                },
+            )
+
+        mock_schema.assert_called_once_with(123)
+        self.assertEqual(mock_save.call_count, 1)
+        saved_state = mock_save.call_args.args[1]
+        self.assertEqual(saved_state["attributes"], {"学业": 65.0, "说明": "学生"})
+        self.assertEqual(saved_state["characters"]["温执"]["attributes"], {"心情": 48.0})
+        self.assertNotIn("陌生角色", saved_state["characters"])
+        self.assertEqual(saved["attributes"], {"学业": 65.0, "说明": "学生"})
+
+    def test_update_state_uses_conversation_schema_and_does_not_save_illegal_attributes(self):
+        current = repositories.normalize_state({
+            "attributes": {"学业": 60, "说明": "学生"},
+            "characters": {"温执": {"attributes": {"心情": 50}, "flags": []}},
+        })
+        schema = {
+            "attributes": {"学业": 60, "说明": "学生"},
+            "characters": {"温执": {"心情": 50}},
+        }
+
+        with patch("backend.services.state_service.get_state", return_value=current), patch(
+            "backend.services.state_service.repositories.get_or_create_attribute_schema",
+            return_value=schema,
+        ) as mock_schema, patch(
+            "backend.services.state_service.repositories.save_state"
+        ) as mock_save:
+            mock_save.side_effect = lambda conversation_id, state: state
+
+            saved = state_service.update_state(
+                456,
+                {
+                    "attributes": {"学业": "+5", "体力": "+10"},
+                    "characters": {
+                        "温执": {"attributes": {"心情": "-2", "魅力": "+3"}},
+                        "陌生角色": {"attributes": {"心情": "+9"}},
+                    },
+                },
+            )
+
+        mock_schema.assert_called_once_with(456)
+        self.assertEqual(mock_save.call_count, 1)
+        saved_state = mock_save.call_args.args[1]
+        self.assertEqual(saved_state["attributes"], {"学业": 65.0, "说明": "学生"})
+        self.assertEqual(saved_state["characters"]["温执"]["attributes"], {"心情": 48.0})
+        self.assertNotIn("陌生角色", saved_state["characters"])
+        self.assertEqual(saved["attributes"], {"学业": 65.0, "说明": "学生"})
+
+    def test_sanitize_state_delta_uses_conversation_schema_to_filter_unknown_attributes(self):
+        current = repositories.normalize_state({
+            "attributes": {"学业": 60, "说明": "学生"},
+            "characters": {"温执": {"attributes": {"心情": 50}, "flags": []}},
+        })
+        schema = {
+            "attributes": {"学业": 60, "说明": "学生"},
+            "characters": {"温执": {"心情": 50}},
+        }
+
+        with patch("backend.services.state_service.get_state", return_value=current), patch(
+            "backend.services.state_service.repositories.get_or_create_attribute_schema",
+            return_value=schema,
+        ) as mock_schema:
+            sanitized = state_service.sanitize_state_delta(
+                789,
+                {
+                    "attributes": {"学业": "+5", "体力": "+10", "说明": "+1"},
+                    "characters": {
+                        "温执": {"attributes": {"心情": "-2", "魅力": "+3"}},
+                        "陌生角色": {"attributes": {"心情": "+9"}},
+                    },
+                    "money": "+10",
+                },
+            )
+
+        mock_schema.assert_called_once_with(789)
+        self.assertEqual(
+            sanitized,
+            {
+                "attributes": {"学业": "+5"},
+                "characters": {"温执": {"attributes": {"心情": "-2"}}},
+                "money": "+10",
+            },
+        )
 
 
 if __name__ == "__main__":
