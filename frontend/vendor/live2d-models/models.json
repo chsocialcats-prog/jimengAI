@@ -32,6 +32,24 @@
       "name": "Tororo",
       "paths": ["/vendor/live2d-models/moc/tororo/tororo.model.json"],
       "message": "Tororo 来啦～"
+    },
+    {
+      "name": "Pio（在线）",
+      "online": true,
+      "paths": ["https://fastly.jsdelivr.net/gh/fghrsh/live2d_api/model/Potion-Maker/Pio/index.json"],
+      "message": "Pio 来自在线模型仓库～"
+    },
+    {
+      "name": "Tia（在线）",
+      "online": true,
+      "paths": ["https://fastly.jsdelivr.net/gh/fghrsh/live2d_api/model/Potion-Maker/Tia/index.json"],
+      "message": "Tia 来自在线模型仓库～"
+    },
+    {
+      "name": "海王星（在线）",
+      "online": true,
+      "paths": ["https://fastly.jsdelivr.net/gh/fghrsh/live2d_api/model/HyperdimensionNeptunia/neptune_classic/index.json"],
+      "message": "海王星系列在线模型已切换～"
     }
   ]
 }

@@ -19,7 +19,7 @@ test("loads one local Live2D autoloader after the app module", () => {
   assert.equal(indexSource.includes("fastly.jsdelivr.net"), false);
 });
 
-test("keeps the widget runtime and model catalog local", () => {
+test("keeps the widget runtime local and supports hybrid model sources", () => {
   assert.match(loaderSource, /waifu-tips\.js/);
   assert.match(loaderSource, /waifu-tips\.json/);
   assert.match(loaderSource, /models\.json/);
@@ -28,12 +28,18 @@ test("keeps the widget runtime and model catalog local", () => {
   assert.match(loaderSource, /drag:\s*true/);
   assert.doesNotMatch(loaderSource, /cubism\.live2d\.com|fastly\.jsdelivr\.net/);
   assert.ok(Array.isArray(modelCatalog.models));
-  assert.ok(modelCatalog.models.length >= 6);
+  assert.ok(modelCatalog.models.length >= 9);
+  assert.ok(modelCatalog.models.filter((model) => model.online !== true).length >= 6);
+  assert.ok(modelCatalog.models.filter((model) => model.online === true).length >= 2);
   for (const model of modelCatalog.models) {
     assert.equal(typeof model.name, "string");
     assert.equal(model.paths.length, 1);
-    assert.match(model.paths[0], /^\/vendor\/live2d-models\/.+\.model\.json$/);
-    assert.equal(existsSync(new URL(`.${model.paths[0]}`, import.meta.url)), true);
+    if (model.online === true) {
+      assert.match(model.paths[0], /^https:\/\/.+\/(index\.json|.+\.model\.json)$/);
+    } else {
+      assert.match(model.paths[0], /^\/vendor\/live2d-models\/.+\.model\.json$/);
+      assert.equal(existsSync(new URL(`.${model.paths[0]}`, import.meta.url)), true);
+    }
   }
   assert.match(readFileSync(new URL("./vendor/live2d-models/model.index", import.meta.url), "utf8"), /raw\.githubusercontent\.com/);
 });
