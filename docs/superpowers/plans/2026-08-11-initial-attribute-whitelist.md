@@ -462,4 +462,3 @@ git commit -m "feat: constrain AI attribute updates" -- backend/database.py back
 ```
 
 提交前再次检查 staged 文件列表只包含本任务文件。
-
