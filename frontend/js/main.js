@@ -2399,12 +2399,42 @@ async function submitCardForm() {
   }
 }
 
+function roleCardJsonFormatHtml() {
+  const example = `{
+  "name": "???",
+  "persona": "???????????????",
+  "personality": "????????",
+  "speaking_style": "???????????",
+  "relationships": { "??": "????????" },
+  "directives": ["????????", "????????"],
+  "initial_state": {
+    "attributes": { "??": 60, "??": 40 },
+    "items": [],
+    "relations": {},
+    "money": 100,
+    "quests": [],
+    "flags": []
+  },
+  "character_attributes": { "??": 50, "???": 0 },
+  "source": "local"
+}`;
+  return `
+    <h2>??? JSON ??</h2>
+    <p>? <code>name</code> ?????????????????</p>
+    <p><code>persona</code>?<code>personality</code>?<code>speaking_style</code> ???????<code>relationships</code>?<code>directives</code>?<code>initial_state</code> ? <code>character_attributes</code> ??????????????<code>source</code> ?????</p>
+    <p>???????????????? <code>{ "card": { ... } }</code> ???<code>id</code>?<code>created_at</code> ? <code>updated_at</code> ??????<code>world</code> ? <code>opening</code> ???????????</p>
+    <pre class="json-format-example"><code>${esc(example)}</code></pre>
+    <div class="modal-actions"><button class="btn btn-primary" type="button" data-close>??</button></div>
+  `;
+}
+
 function bindCardEditorEvents() {
   $("#add-directive")?.addEventListener("click", () => addDynamicRow("#directive-rows", { mode: "single", placeholder: "保持人设" }));
   $("#add-attribute")?.addEventListener("click", () => addDynamicRow("#attribute-rows", { mode: "pair", placeholders: ["属性名", "数值"] }));
   $("#add-character-attribute")?.addEventListener("click", () => addCharacterAttributeRow());
   $("#add-relation")?.addEventListener("click", () => addDynamicRow("#relation-rows", { mode: "pair", placeholders: ["关系对象", "关系说明"] }));
   $("#card-editor-back")?.addEventListener("click", () => navigate("#/cards"));
+  $("#card-json-format-btn")?.addEventListener("click", () => openModal(roleCardJsonFormatHtml()));
   $("#card-file")?.addEventListener("change", async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
