@@ -583,37 +583,8 @@ def save_state(conversation_id, state, *, connect_fn=database.connect):
     """保存实时状态，并同步到会话的 current_state 字段。"""
     normalized = normalize_state(state)
     now = database.now_str()
-    existing = database.fetch_one(
-        "SELECT id FROM states WHERE conversation_id = ?", (conversation_id,)
-    )
     with closing(connect_fn()) as connection:
-        if existing:
-            connection.execute(
-                """
-                UPDATE states SET attributes = ?, items = ?, money = ?,
-                    relations = ?, quests = ?, flags = ?, characters = ?, logs = ?,
-                    updated_at = ?
-                WHERE conversation_id = ?
-                """,
-                (
-                    database.json_dumps(normalized["attributes"]),
-                    database.json_dumps(normalized["items"]),
-                    normalized["money"],
-                    database.json_dumps(normalized["relations"]),
-                    database.json_dumps(normalized["quests"]),
-                    database.json_dumps(normalized["flags"]),
-                    database.json_dumps(normalized["characters"]),
-                    database.json_dumps(normalized["logs"]),
-                    now,
-                    conversation_id,
-                ),
-            )
-        else:
-            _save_state_row_in_connection(connection, conversation_id, normalized, now)
-        connection.execute(
-            "UPDATE conversations SET current_state = ?, updated_at = ? WHERE id = ?",
-            (database.json_dumps(normalized), now, conversation_id),
-        )
+        _save_state_in_connection(connection, conversation_id, normalized, now)
         connection.commit()
     return get_state(conversation_id, connect_fn=connect_fn)
 
@@ -676,21 +647,8 @@ def save_memory_summary(
 ):
     """写入会话长期记忆摘要。"""
     now = database.now_str()
-    existing = database.fetch_one(
-        "SELECT id FROM memory_summaries WHERE conversation_id = ?",
-        (conversation_id,),
-    )
     with closing(connect_fn()) as connection:
-        if existing:
-            connection.execute(
-                "UPDATE memory_summaries SET summary = ?, covered_until_sequence = ?, updated_at = ? "
-                "WHERE conversation_id = ?",
-                (summary, int(covered_until_sequence), now, conversation_id),
-            )
-        else:
-            connection.execute(
-                "INSERT INTO memory_summaries "
-                "(conversation_id, summary, covered_until_sequence, updated_at) VALUES (?, ?, ?, ?)",
-                (conversation_id, summary, int(covered_until_sequence), now),
-            )
+        _save_memory_summary_in_connection(
+            connection, conversation_id, summary, covered_until_sequence, now
+        )
         connection.commit()
