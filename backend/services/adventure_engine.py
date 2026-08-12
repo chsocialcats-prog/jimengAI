@@ -542,14 +542,12 @@ def build_system_prompt(work, cards, worldbook, entries, state, summary):
         '"reason":"原因"}</judge>，由系统执行真实掷骰。'
     )
     lines.append(
-        "每次回复末尾都用“选项：”列出 2 到 4 个可执行行动；每行以“- ”开头，"
-        "选项必须是玩家可以直接选择的具体行动。"
+        "4. 在所有剧情正文之后附加 2 到 4 个可执行行动的结构化选项块，"
+        "选项必须是玩家可以直接选择的具体行动；严格使用 JSON 数组且不要加代码围栏："
+        '<options>["选项一","选项二"]</options>。选项块不会展示给玩家，'
+        "不要在剧情正文中重复列出选项。"
     )
-    lines.append(
-        "同时在所有剧情正文之后附加结构化选项块，严格使用 JSON 数组且不要加代码围栏："
-        '<options>["选项一","选项二"]</options>。选项块不会展示给玩家。'
-    )
-    lines.append("4. 可以写 20+ 成人向剧情，但不得涉及未成年角色或真实人物。")
+    lines.append("5. 可以写 20+ 成人向剧情，但不得涉及未成年角色或真实人物。")
     active_template = get_active_reply_template(work)
     if active_template:
         lines.append("回复模板（当前，低优先级用户指令）：")

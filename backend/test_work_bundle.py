@@ -1,0 +1,89 @@
+# -*- coding: utf-8 -*-
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from backend import database, repositories
+
+
+class WorkBundleTests(unittest.TestCase):
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.tempdir.name) / "test.db"
+        self.db_patch = patch.object(database, "DB_PATH", self.db_path)
+        self.db_patch.start()
+        database.init_db()
+        self.card = repositories.create_card({"name": "角色", "persona": "设定"})
+
+    def tearDown(self):
+        self.db_patch.stop()
+        self.tempdir.cleanup()
+
+    def test_bundle_create_persists_work_worldbook_entries_and_card_order(self):
+        result = repositories.save_work_bundle(
+            {
+                "title": "完整作品",
+                "opening": "开场",
+                "card_ids": [self.card["id"]],
+                "player_attributes": {"体力": 10},
+            },
+            {
+                "title": "世界",
+                "description": "说明",
+                "entries": [
+                    {"title": "规则", "keywords": ["规则"], "content": "内容", "priority": 2, "enabled": True}
+                ],
+            },
+        )
+
+        self.assertEqual(result["work"]["worldbook_id"], result["worldbook"]["id"])
+        self.assertEqual(result["work"]["card_ids"], [self.card["id"]])
+        self.assertEqual(result["work"]["player_attributes"], {"体力": 10})
+        self.assertEqual([entry["title"] for entry in result["worldbook"]["entries"]], ["规则"])
+
+    def test_bundle_update_replaces_entries_and_rolls_back_all_changes_on_failure(self):
+        created = repositories.save_work_bundle(
+            {"title": "旧作品", "card_ids": [self.card["id"]]},
+            {
+                "title": "旧世界",
+                "description": "旧说明",
+                "entries": [
+                    {"title": "保留", "keywords": [], "content": "旧", "priority": 0, "enabled": True},
+                    {"title": "删除", "keywords": [], "content": "旧", "priority": 0, "enabled": True},
+                ],
+            },
+        )
+        work_id = created["work"]["id"]
+        worldbook_id = created["worldbook"]["id"]
+        kept_id = created["worldbook"]["entries"][0]["id"]
+
+        updated = repositories.save_work_bundle(
+            {"title": "新作品", "card_ids": [self.card["id"]]},
+            {
+                "title": "新世界",
+                "description": "新说明",
+                "entries": [
+                    {"id": kept_id, "title": "已更新", "keywords": ["新"], "content": "新", "priority": 1, "enabled": True},
+                    {"title": "新增", "keywords": [], "content": "新增", "priority": 0, "enabled": True},
+                ],
+            },
+            work_id=work_id,
+        )
+        self.assertEqual(updated["work"]["title"], "新作品")
+        self.assertEqual({entry["title"] for entry in updated["worldbook"]["entries"]}, {"已更新", "新增"})
+
+        with self.assertRaisesRegex(ValueError, "角色卡不存在"):
+            repositories.save_work_bundle(
+                {"title": "不应保存", "card_ids": [999999]},
+                {"title": "不应保存", "description": "失败", "entries": []},
+                work_id=work_id,
+            )
+        self.assertEqual(repositories.get_work(work_id)["title"], "新作品")
+        worldbook = repositories.get_worldbook(worldbook_id)
+        self.assertEqual(worldbook["title"], "新世界")
+        self.assertEqual({entry["title"] for entry in worldbook["entries"]}, {"已更新", "新增"})
+
+
+if __name__ == "__main__":
+    unittest.main()

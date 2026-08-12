@@ -1,53 +1,33 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
+import { nowISO } from "./js/core/format.mjs";
+import { messageMetaHtml, replyCharacterCount } from "./js/adventure-page.mjs";
 
-const mainJs = fs.readFileSync(new URL("./js/main.js", import.meta.url), "utf8");
+const adventureJs = fs.readFileSync(new URL("./js/adventure-page.mjs", import.meta.url), "utf8");
 const css = fs.readFileSync(new URL("./css/style.css", import.meta.url), "utf8");
 
 function extractFunctionSource(signature) {
-  const start = mainJs.indexOf(signature);
+  const start = adventureJs.indexOf(signature);
   assert.notEqual(start, -1, `${signature} should be defined`);
-  const bodyStart = mainJs.indexOf("{", start);
+  const bodyStart = adventureJs.indexOf("{", start);
   assert.notEqual(bodyStart, -1, `${signature} should have a body`);
   let depth = 0;
-  for (let index = bodyStart; index < mainJs.length; index += 1) {
-    if (mainJs[index] === "{") depth += 1;
-    if (mainJs[index] === "}" && --depth === 0) {
-      return mainJs.slice(start, index + 1);
+  for (let index = bodyStart; index < adventureJs.length; index += 1) {
+    if (adventureJs[index] === "{") depth += 1;
+    if (adventureJs[index] === "}" && --depth === 0) {
+      return adventureJs.slice(start, index + 1);
     }
   }
   throw new Error(`Could not extract ${signature}`);
 }
 
-function loadHelpers() {
-  const source = [
-    extractFunctionSource("function replyCharacterCount("),
-    extractFunctionSource("function messageMetaHtml("),
-  ].join("\n");
-  return new Function(`
-    const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;",
-    }[ch]));
-    const formatTime = (value) => String(value).slice(0, 16);
-    ${source}
-    return { replyCharacterCount, messageMetaHtml };
-  `)();
-}
-
 test("回复字数忽略空白但保留中文标点", () => {
-  const { replyCharacterCount } = loadHelpers();
-
   assert.equal(replyCharacterCount("  你好，\n世界！  "), 6);
   assert.equal(replyCharacterCount("a b\nc"), 3);
 });
 
 test("发送时间使用本地时间而不是 UTC 时间", () => {
-  const source = extractFunctionSource("function nowISO(");
   class FakeDate {
     toISOString() { return "2026-08-11T14:18:00.000Z"; }
     getFullYear() { return 2026; }
@@ -57,13 +37,16 @@ test("发送时间使用本地时间而不是 UTC 时间", () => {
     getMinutes() { return 18; }
     getSeconds() { return 0; }
   }
-  const nowISO = new Function("Date", `${source}; return nowISO;`)(FakeDate);
-
-  assert.equal(nowISO(), "2026-08-11 22:18:00");
+  const OriginalDate = globalThis.Date;
+  globalThis.Date = FakeDate;
+  try {
+    assert.equal(nowISO(), "2026-08-11 22:18:00");
+  } finally {
+    globalThis.Date = OriginalDate;
+  }
 });
 
 test("AI 元信息包含时间和字数且不使用圆点分隔", () => {
-  const { messageMetaHtml } = loadHelpers();
   const html = messageMetaHtml({
     role: "assistant",
     content: "你好！",
@@ -77,7 +60,6 @@ test("AI 元信息包含时间和字数且不使用圆点分隔", () => {
 });
 
 test("用户和系统消息不生成回复元信息", () => {
-  const { messageMetaHtml } = loadHelpers();
   const base = { content: "不应显示", created_at: "2026-08-11 14:18:00" };
 
   assert.equal(messageMetaHtml({ ...base, role: "user" }), "");

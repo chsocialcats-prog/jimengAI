@@ -3,10 +3,11 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const source = readFileSync(new URL("./js/main.js", import.meta.url), "utf8");
+const adventureSource = readFileSync(new URL("./js/adventure-page.mjs", import.meta.url), "utf8");
 
 test("独立角色卡编辑器不提供初始数值关系编辑，并保留历史关系", () => {
   const start = source.indexOf("async function submitCardForm");
-  const end = source.indexOf("async function renderCreator", start);
+  const end = source.indexOf("async function renderSettings", start);
   const cardEditor = source.slice(start, end);
   assert.ok(start >= 0, "独立角色卡编辑器应存在");
   assert.doesNotMatch(cardEditor, /id="initial-relation-rows"/);
@@ -27,8 +28,8 @@ test("开局设定弹窗无论是否只读都能通过关闭按钮关闭", () =>
     source,
     /modalRoot\?\.addEventListener\("click", \(event\) => \{[\s\S]*?event\.target\.closest\("\[data-close\]"\)[\s\S]*?modalRoot\.innerHTML = "";/
   );
-  const start = source.indexOf("function openAdventureOnboarding");
-  const end = source.indexOf("function toggleStatusSidebar", start);
-  const onboarding = source.slice(start, end);
+  const start = adventureSource.indexOf("function openAdventureOnboarding");
+  const end = adventureSource.indexOf("function toggleStatusSidebar", start);
+  const onboarding = adventureSource.slice(start, end);
   assert.match(onboarding, /type="button" data-close>关闭<\/button>/);
 });

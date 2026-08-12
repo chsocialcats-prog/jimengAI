@@ -128,6 +128,8 @@ CREATE TABLE IF NOT EXISTS snapshots (
     messages TEXT NOT NULL DEFAULT '[]',
     memory_summary TEXT NOT NULL DEFAULT '',
     memory_summary_covered_until_sequence INTEGER NOT NULL DEFAULT -1,
+    persona_corrections TEXT,
+    memory_corrections TEXT,
     branch_label TEXT NOT NULL DEFAULT '',
     note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
@@ -496,11 +498,23 @@ def init_db():
             )
             _ensure_column(
                 connection,
+                "snapshots",
+                "persona_corrections",
+                "ALTER TABLE snapshots ADD COLUMN persona_corrections TEXT",
+            )
+            _ensure_column(
+                connection,
+                "snapshots",
+                "memory_corrections",
+                "ALTER TABLE snapshots ADD COLUMN memory_corrections TEXT",
+            )
+            _ensure_column(
+                connection,
                 "memory_summaries",
                 "covered_until_sequence",
                 "ALTER TABLE memory_summaries ADD COLUMN covered_until_sequence INTEGER NOT NULL DEFAULT -1",
             )
-            connection.execute("PRAGMA user_version = 1")
+            connection.execute("PRAGMA user_version = 2")
             connection.commit()
         except Exception:
             if connection.in_transaction:

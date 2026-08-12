@@ -1,35 +1,34 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
+import {
+  DEFAULT_REPLY_LENGTH,
+  REPLY_LENGTH_PRESETS,
+  loadReplyLength,
+  normalizeReplyLength,
+  replyLengthStorageKey,
+  saveReplyLength,
+} from "./js/chat/reply-length.mjs";
 
 const mainJs = fs.readFileSync(new URL("./js/main.js", import.meta.url), "utf8");
-const helperStart = mainJs.indexOf("const REPLY_LENGTH_PRESETS =");
-const helperEnd = mainJs.indexOf("modalRoot?.addEventListener", helperStart);
-assert.notEqual(helperStart, -1, "reply length helpers should be defined");
-assert.notEqual(helperEnd, -1, "reply length helper block should be complete");
-const helperSource = mainJs.slice(helperStart, helperEnd);
+const adventureJs = fs.readFileSync(new URL("./js/adventure-page.mjs", import.meta.url), "utf8");
+const dataJs = fs.readFileSync(new URL("./js/data.mjs", import.meta.url), "utf8");
 
-function loadHelpers() {
-  return new Function(`${helperSource}; return { REPLY_LENGTH_PRESETS, DEFAULT_REPLY_LENGTH, normalizeReplyLength, replyLengthStorageKey, loadReplyLength, saveReplyLength };`)();
-}
-
-function extractFunctionSource(signature) {
-  const start = mainJs.indexOf(signature);
+function extractFunctionSource(signature, source = adventureJs) {
+  const start = source.indexOf(signature);
   assert.notEqual(start, -1, `${signature} should be defined`);
-  const bodyStart = mainJs.indexOf("{", mainJs.indexOf(")", start));
+  const bodyStart = source.indexOf("{", source.indexOf(")", start));
   let depth = 0;
-  for (let index = bodyStart; index < mainJs.length; index += 1) {
-    if (mainJs[index] === "{") depth += 1;
-    if (mainJs[index] === "}" && --depth === 0) {
-      return mainJs.slice(start, index + 1);
+  for (let index = bodyStart; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    if (source[index] === "}" && --depth === 0) {
+      return source.slice(start, index + 1);
     }
   }
   throw new Error(`Could not extract ${signature}`);
 }
 
 test("回复长度助手提供四档选项并将未知值归一化为详细", () => {
-  const { REPLY_LENGTH_PRESETS, DEFAULT_REPLY_LENGTH, normalizeReplyLength } = loadHelpers();
-
   assert.deepEqual(Object.keys(REPLY_LENGTH_PRESETS), ["short", "standard", "detailed", "long"]);
   assert.equal(DEFAULT_REPLY_LENGTH, "detailed");
   assert.equal(normalizeReplyLength("long"), "long");
@@ -38,7 +37,6 @@ test("回复长度助手提供四档选项并将未知值归一化为详细", ()
 });
 
 test("回复长度偏好按会话分别保存和读取", () => {
-  const { loadReplyLength, replyLengthStorageKey, saveReplyLength } = loadHelpers();
   const values = new Map();
   const storage = {
     getItem(key) { return values.get(key) ?? null; },
@@ -54,7 +52,7 @@ test("回复长度偏好按会话分别保存和读取", () => {
 });
 
 test("在线请求携带当前会话的回复长度，离线分支保持原样", () => {
-  const streamSource = extractFunctionSource("async function streamChat(");
+  const streamSource = extractFunctionSource("export async function streamChat(", dataJs);
 
   assert.match(streamSource, /async function streamChat\(conversationId, content, handlers, metadata = \{\}\)/);
   assert.match(streamSource, /if \(MODE === "offline"\)/);

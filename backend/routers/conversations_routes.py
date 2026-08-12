@@ -176,6 +176,8 @@ def restore_snapshot(conversation_id: int, snapshot_id: int):
         "conversation_id": conversation_id,
         "snapshot_id": snapshot_id,
         "state": state,
+        "conversation": repositories.get_conversation(conversation_id),
+        "messages": repositories.get_messages(conversation_id),
     }
 
 

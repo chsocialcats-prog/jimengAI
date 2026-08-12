@@ -1,24 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
+import {
+  cardSummaryText,
+  orderedWorkCards,
+  resolveSessionCards,
+  workCardIds,
+} from "./js/domain/role-cards.mjs";
 
 const source = await readFile(new URL("./js/main.js", import.meta.url), "utf8");
-
-function cardResolutionRuntime() {
-  const start = source.indexOf("function isRoleCard");
-  const end = source.indexOf("function workCardHtml", start);
-  assert.ok(start >= 0, "missing multi-card resolution helpers");
-  assert.ok(end > start, "missing work-card rendering boundary");
-  return new Function(`${source.slice(start, end)}\nreturn { orderedWorkCards, resolveSessionCards, cardSummaryText };`)();
-}
+const adventureSource = await readFile(new URL("./js/adventure-page.mjs", import.meta.url), "utf8");
+const creatorSource = await readFile(new URL("./js/creator-page.mjs", import.meta.url), "utf8");
+const dataSource = await readFile(new URL("./js/data.mjs", import.meta.url), "utf8");
 
 function adventureRuntime({ conversation, workResult = null }) {
-  const adventure = sliceBetween("async function renderAdventure", "function openAdventureOnboarding");
+  const adventure = sliceAdventureBetween("async function renderAdventure", "function openAdventureOnboarding");
   const calls = { getWork: [], getWorldbook: [], navigate: [] };
   const backButton = { addEventListener(_type, handler) { this.handler = handler; } };
   const appEl = { innerHTML: "", addEventListener() {} };
   const factory = new Function(
-    "MODE", "api", "getWork", "getWorldbook", "getMessages", "getState", "getSnapshots",
+    "MODE", "getConversation", "getWork", "getWorldbook", "getMessages", "getState", "getSnapshots",
     "resolveSessionCards", "cardSummaryText", "esc", "icon", "bindAdventureEvents",
     "renderMessages", "renderSidebar", "setStreamingUi", "scrollMessages", "REPLY_LENGTH_PRESETS", "loadReplyLength", "appEl", "$",
     `let session;\n${adventure}\nreturn { renderAdventure, getSession: () => session };`
@@ -39,13 +40,11 @@ function adventureRuntime({ conversation, workResult = null }) {
 }
 
 test("legacy single-card work data normalizes to one ordered active card", () => {
-  const { orderedWorkCards } = cardResolutionRuntime();
   const cards = orderedWorkCards({ card_id: 9, card: { id: 9, name: "legacy" } });
   assert.deepEqual(cards.map((card) => card.name), ["legacy"]);
 });
 
 test("work cards follow card_ids order instead of response object order", () => {
-  const { orderedWorkCards } = cardResolutionRuntime();
   const cards = orderedWorkCards({
     card_ids: [2, 1],
     cards: [{ id: 1, name: "first" }, { id: 2, name: "second" }],
@@ -54,7 +53,6 @@ test("work cards follow card_ids order instead of response object order", () => 
 });
 
 test("work card_ids exclude response cards outside the selected IDs", () => {
-  const { orderedWorkCards } = cardResolutionRuntime();
   const cards = orderedWorkCards({
     card_ids: [2],
     cards: [
@@ -67,7 +65,6 @@ test("work card_ids exclude response cards outside the selected IDs", () => {
 });
 
 test("explicit empty work card_ids select no cards despite response cards", () => {
-  const { orderedWorkCards } = cardResolutionRuntime();
   const cards = orderedWorkCards({
     card_ids: [],
     cards: [{ id: 1, name: "unexpected response card" }],
@@ -76,7 +73,6 @@ test("explicit empty work card_ids select no cards despite response cards", () =
 });
 
 test("work responses without card_ids keep cards as legacy fallback", () => {
-  const { orderedWorkCards } = cardResolutionRuntime();
   const cards = orderedWorkCards({
     cards: [{ id: 1, name: "legacy first" }, { id: 2, name: "legacy second" }],
   });
@@ -84,7 +80,6 @@ test("work responses without card_ids keep cards as legacy fallback", () => {
 });
 
 test("session resolution keeps frozen snapshots after live cards change", () => {
-  const { resolveSessionCards } = cardResolutionRuntime();
   const cards = resolveSessionCards(
     { card_snapshots: [{ id: 1, name: "frozen one" }, { id: 2, name: "frozen two" }] },
     { card_ids: [2, 1], cards: [{ id: 2, name: "live rename" }, { id: 1, name: "live other" }] }
@@ -93,7 +88,6 @@ test("session resolution keeps frozen snapshots after live cards change", () => 
 });
 
 test("new no-card snapshots remain a valid no-character session", () => {
-  const { resolveSessionCards, cardSummaryText } = cardResolutionRuntime();
   const cards = resolveSessionCards(
     { card_snapshots: [] },
     { card_ids: [1], cards: [{ id: 1, name: "later card" }] }
@@ -122,23 +116,25 @@ test("online historical session without a work uses its frozen cards and convers
 });
 
 test("adventure and onboarding return links avoid a null work route", () => {
-  const bindings = sliceBetween("function bindAdventureEvents", "async function openCorrectionModal");
-  const onboarding = sliceBetween("async function renderOnboarding", "async function renderAdventure");
+  const bindings = sliceAdventureBetween("function bindAdventureEvents", "async function openCorrectionModal");
+  const onboarding = sliceAdventureBetween("async function renderOnboarding", "async function renderAdventure");
   assert.match(bindings, /session\.conv\.work_id\s*\?\s*`#\/work\/\$\{session\.conv\.work_id\}`\s*:\s*"#\/"/);
   assert.match(onboarding, /conversation\.work_id\s*\?\s*`#\/work\/\$\{conversation\.work_id\}`\s*:\s*"#\/"/);
 });
 
 test("adventure state and persona corrections consume resolved ordered session cards", () => {
-  const adventure = sliceBetween("async function renderAdventure", "function openAdventureOnboarding");
-  const correction = sliceBetween("async function openCorrectionModal", "function addDynamicRow");
-  const createConversationSource = sliceBetween("async function createConversation", "async function listConversations");
+  const adventure = sliceAdventureBetween("async function renderAdventure", "function openAdventureOnboarding");
+  const correction = adventureSource.slice(adventureSource.indexOf("async function openCorrectionModal"));
+  const createStart = dataSource.indexOf("export async function createConversation");
+  const createEnd = dataSource.indexOf("export async function getConversation", createStart);
+  const createConversationSource = dataSource.slice(createStart, createEnd);
   assert.match(adventure, /const cards = resolveSessionCards\(conv, work\);/);
   assert.match(adventure, /session = \{ conv, work, cards, card: cards\[0\] \|\| null,/);
   assert.match(correction, /session\.cards/);
   assert.match(correction, /flatMap\(\(card\)/);
   assert.match(createConversationSource, /const work = await getWork\(workId\);/);
-  assert.match(source, /card_ids:\s*collectWorkCardIds\(\)/);
-  assert.match(source, /player_attributes:\s*collectAttributeRows\("#player-attribute-rows"\)/);
+  assert.match(creatorSource, /card_ids:\s*collectWorkCardIds\(\)/);
+  assert.match(creatorSource, /player_attributes:\s*collectAttributeRows\("#player-attribute-rows"\)/);
 });
 
 function sliceBetween(startMarker, endMarker) {
@@ -149,8 +145,24 @@ function sliceBetween(startMarker, endMarker) {
   return source.slice(start, end);
 }
 
+function sliceAdventureBetween(startMarker, endMarker) {
+  const start = adventureSource.indexOf(startMarker);
+  const end = adventureSource.indexOf(endMarker, start);
+  assert.ok(start >= 0, `missing adventure ${startMarker}`);
+  assert.ok(end > start, `missing adventure ${endMarker}`);
+  return adventureSource.slice(start, end);
+}
+
+function sliceCreatorBetween(startMarker, endMarker) {
+  const start = creatorSource.indexOf(startMarker);
+  const end = creatorSource.indexOf(endMarker, start);
+  assert.ok(start >= 0, `missing creator ${startMarker}`);
+  assert.ok(end > start, `missing creator ${endMarker}`);
+  return creatorSource.slice(start, end);
+}
+
 test("role-card editor hides player attributes while retaining legacy initial state on save", () => {
-  const editor = sliceBetween("async function renderCardEditor", "async function renderCreator");
+  const editor = sliceBetween("async function renderCardEditor", "async function renderSettings");
   const submit = sliceBetween("async function submitCardForm", "function bindCardEditorEvents");
   assert.doesNotMatch(editor, /id="attribute-rows"/);
   assert.doesNotMatch(editor, /id="add-attribute"/);
@@ -161,37 +173,37 @@ test("role-card editor hides player attributes while retaining legacy initial st
 });
 
 test("script settings render script-level attribute rows with explicit empty clearing", () => {
-  const creator = sliceBetween("async function renderCreator", "async function renderSettings");
-  const fill = sliceBetween("function fillCreatorForm", "async function loadCreatorEditData");
-  const submit = sliceBetween("async function submitCreatorForm", "function bindCreatorEvents");
+  const creator = creatorSource;
+  const fill = sliceCreatorBetween("function fillCreatorForm", "async function loadCreatorEditData");
+  const submit = sliceCreatorBetween("async function submitCreatorForm", "function bindCreatorEvents");
   assert.match(creator, /id="player-attribute-rows"/);
   assert.match(creator, /id="add-player-attribute"/);
   assert.match(fill, /populateAttributeRows\("#player-attribute-rows", work\.player_attributes/);
   assert.match(submit, /player_attributes:\s*collectAttributeRows\("#player-attribute-rows"\)/);
-  assert.match(source, /if \(!key && !rawValue\) return;/);
-  assert.match(source, /throw new Error\("属性名称不能为空"\)/);
-  assert.match(source, /throw new Error\(`属性名称重复：\$\{key\}`\)/);
+  assert.match(creatorSource, /if \(!key && !rawValue\) return;/);
+  assert.match(creatorSource, /throw new Error\("属性名称不能为空"\)/);
+  assert.match(creatorSource, /throw new Error\(`属性名称重复：\$\{key\}`\)/);
 });
 
 test("script settings manage unique role cards in visible order", () => {
-  const creator = sliceBetween("async function renderCreator", "async function renderSettings");
-  const bindings = sliceBetween("function bindCreatorEvents", "function referencedWorksForCard");
+  const creator = creatorSource;
+  const bindings = sliceCreatorBetween("function bindCreatorEvents", "export async function renderCreator");
   assert.match(creator, /id="work-card-rows"/);
   assert.match(creator, /id="work-card-add"/);
   assert.match(creator, /id="add-work-card"/);
-  assert.match(source, /function populateWorkCardRows\(cards = \[\], selectedIds = \[\]\)/);
-  assert.match(source, /function collectWorkCardIds\(\)/);
-  assert.match(source, /data-work-card-action="remove"/);
-  assert.match(source, /data-work-card-action="up"/);
-  assert.match(source, /data-work-card-action="down"/);
-  assert.match(source, /availableCards = workCardOptions\.filter\(\(card\) => !selectedIds\.includes\(Number\(card\.id\)\)\)/);
+  assert.match(creatorSource, /function populateWorkCardRows\(cards = \[\], selectedIds = \[\]\)/);
+  assert.match(creatorSource, /function collectWorkCardIds\(\)/);
+  assert.match(creatorSource, /data-work-card-action="remove"/);
+  assert.match(creatorSource, /data-work-card-action="up"/);
+  assert.match(creatorSource, /data-work-card-action="down"/);
+  assert.match(creatorSource, /availableCards = workCardOptions\.filter\(\(card\) => !selectedIds\.includes\(Number\(card\.id\)\)\)/);
   assert.match(bindings, /dataset\.workCardAction/);
 });
 
 test("legacy single-card scripts load as one card and save the multi-card API payload", () => {
-  const creator = sliceBetween("async function renderCreator", "async function renderSettings");
-  const submit = sliceBetween("async function submitCreatorForm", "function bindCreatorEvents");
-  assert.match(source, /function workCardIds\(work = \{\}\)/);
+  const creator = creatorSource;
+  const submit = sliceCreatorBetween("async function submitCreatorForm", "function bindCreatorEvents");
+  assert.deepEqual(workCardIds({ card_id: 3 }), [3]);
   assert.match(creator, /populateWorkCardRows\(cards, workCardIds\(editData\.work\)\)/);
   assert.match(submit, /card_ids:\s*collectWorkCardIds\(\)/);
   assert.match(submit, /player_attributes:\s*collectAttributeRows\("#player-attribute-rows"\)/);
@@ -200,8 +212,8 @@ test("legacy single-card scripts load as one card and save the multi-card API pa
 });
 
 test("existing script loading keeps saving locked until work, cards, and selected card IDs initialize", () => {
-  const creator = sliceBetween("async function renderCreator", "async function renderSettings");
-  const submit = sliceBetween("async function submitCreatorForm", "function bindCreatorEvents");
+  const creator = creatorSource;
+  const submit = sliceCreatorBetween("async function submitCreatorForm", "function bindCreatorEvents");
 
   assert.match(creator, /id="creator-save-btn"[^>]* disabled/);
   assert.match(creator, /const \[editDataResult, cardsResult\] = await Promise\.allSettled\(\[/);
@@ -216,7 +228,7 @@ test("existing script loading keeps saving locked until work, cards, and selecte
 
 test("referenced-card warnings include scripts using a non-first selected card", () => {
   const references = sliceBetween("function referencedWorksForCard", "function referencedWorkNames");
-  const editor = sliceBetween("async function renderCardEditor", "async function renderCreator");
+  const editor = sliceBetween("async function renderCardEditor", "async function renderSettings");
   assert.match(references, /workCardIds\(work\)\.includes\(Number\(cardId\)\)/);
   assert.match(editor, /引用剧本：\$\{referenceNames\}/);
   assert.match(editor, /已经开始的旧会话不会改变/);

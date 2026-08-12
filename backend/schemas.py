@@ -93,6 +93,26 @@ class WorkUpdate(BaseModel):
     is_archive: Optional[bool] = None
 
 
+class CreatorWorldbookEntry(WorldbookEntryCreate):
+    id: Optional[int] = None
+
+
+class CreatorWorldbook(BaseModel):
+    title: str
+    description: str = ""
+    entries: list[CreatorWorldbookEntry] = Field(default_factory=list)
+
+
+class WorkBundleCreate(BaseModel):
+    work: WorkCreate
+    worldbook: CreatorWorldbook
+
+
+class WorkBundleUpdate(BaseModel):
+    work: WorkUpdate
+    worldbook: CreatorWorldbook
+
+
 class ConversationCreate(BaseModel):
     work_id: int
     title: str = "新的冒险"

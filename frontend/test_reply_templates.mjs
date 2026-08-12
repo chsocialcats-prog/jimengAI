@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
+import { normalizeMockReplyTemplateFields } from "./js/data.mjs";
 
 const mainJs = fs.readFileSync(new URL("./js/main.js", import.meta.url), "utf8");
+const adventureJs = fs.readFileSync(new URL("./js/adventure-page.mjs", import.meta.url), "utf8");
+const creatorSource = fs.readFileSync(new URL("./js/creator-page.mjs", import.meta.url), "utf8");
 const css = fs.readFileSync(new URL("./css/style.css", import.meta.url), "utf8");
-const creatorStart = mainJs.indexOf("async function renderCreator");
-const creatorEnd = mainJs.indexOf("async function renderSettings");
-const creatorSource = mainJs.slice(creatorStart, creatorEnd);
 
 function extractFunction(name) {
   const start = mainJs.indexOf(`function ${name}(`);
@@ -26,19 +26,19 @@ test("作品编辑器提供多模板编辑和当前模板选择", () => {
   assert.match(creatorSource, /reply-template-rows/);
   assert.match(creatorSource, /add-reply-template/);
   assert.match(creatorSource, /active_reply_template_id/);
-  assert.match(mainJs, /function addReplyTemplateCard\(template = \{\}\)/);
-  assert.match(mainJs, /function collectReplyTemplates\(\)/);
+  assert.match(creatorSource, /function addReplyTemplateCard\(template = \{\}\)/);
+  assert.match(creatorSource, /function collectReplyTemplates\(\)/);
   assert.match(css, /reply-template-card/);
 });
 
 test("模板字段会进入创建和更新作品请求", () => {
-  assert.match(mainJs, /reply_templates/);
-  assert.match(mainJs, /active_reply_template_id/);
-  assert.match(mainJs, /collectReplyTemplates\(\)/);
+  assert.match(creatorSource, /reply_templates/);
+  assert.match(creatorSource, /active_reply_template_id/);
+  assert.match(creatorSource, /collectReplyTemplates\(\)/);
 });
 
 test("离线作品上载会补齐并验证回复模板字段", () => {
-  const normalize = extractFunction("normalizeMockReplyTemplateFields");
+  const normalize = normalizeMockReplyTemplateFields;
 
   assert.deepEqual(normalize({ id: 1 }), {
     id: 1,
@@ -69,14 +69,14 @@ test("离线作品上载会补齐并验证回复模板字段", () => {
 test("作品编辑器可以显式禁用模板并提交空活动 ID", () => {
   assert.match(creatorSource, /id="disable-reply-template"/);
   assert.match(creatorSource, /不启用模板/);
-  assert.match(mainJs, /function selectedReplyTemplateId\(\)/);
-  assert.match(mainJs, /active_reply_template_id:\s*selectedReplyTemplateId\(\)/);
-  assert.match(mainJs, /disable-reply-template[\s\S]*return ""/);
+  assert.match(creatorSource, /function selectedReplyTemplateId\(\)/);
+  assert.match(creatorSource, /active_reply_template_id:\s*selectedReplyTemplateId\(\)/);
+  assert.match(creatorSource, /disable-reply-template[\s\S]*return ""/);
 });
 
 test("聊天渲染区域没有模板切换控件", () => {
-  const adventureStart = mainJs.indexOf("function renderAdventure");
-  const adventureEnd = mainJs.indexOf("function bindAdventureEvents");
-  const adventureSource = mainJs.slice(adventureStart, adventureEnd);
+  const adventureStart = adventureJs.indexOf("async function renderAdventure");
+  const adventureEnd = adventureJs.indexOf("function openAdventureOnboarding");
+  const adventureSource = adventureJs.slice(adventureStart, adventureEnd);
   assert.doesNotMatch(adventureSource, /reply-template-rows|add-reply-template|reply-template-card/);
 });

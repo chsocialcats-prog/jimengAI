@@ -31,6 +31,8 @@ class OptionOutputTests(unittest.TestCase):
         )
 
         self.assertIn("<options>[\"选项一\",\"选项二\"]</options>", prompt)
+        self.assertIn("不要在剧情正文中重复列出选项", prompt)
+        self.assertNotIn("每次回复末尾都用“选项：”", prompt)
 
     def test_fallback_options_are_always_two_to_four_actions(self):
         options = adventure_engine.default_turn_options("你来到一扇紧闭的门前。", "继续观察")

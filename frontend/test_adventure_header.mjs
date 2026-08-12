@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const source = readFileSync(new URL("./js/main.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("./js/adventure-page.mjs", import.meta.url), "utf8");
 
 test("冒险页状态与开局设定按钮使用整齐的表情标识", () => {
   assert.match(source, /<div class="detail-actions adventure-actions">/);

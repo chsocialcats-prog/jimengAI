@@ -27,6 +27,7 @@ from ..sse import sse
 
 router = APIRouter(prefix="/api/conversations", tags=["流式对话"])
 _activity_registry_init_lock = threading.Lock()
+_MAX_CONTINUATION_ATTEMPTS = 2
 
 
 def _chat_activity(app):
@@ -239,6 +240,8 @@ def _stream_ai_reply(conversation_id, stop_event, client_metadata=None):
     emitted = ""
     usage = None
     stopped = False
+    finish_reason = None
+    continuation_failed = False
 
     try:
         if reply_settings["key"] is None:
@@ -262,6 +265,8 @@ def _stream_ai_reply(conversation_id, stop_event, client_metadata=None):
                 if visible:
                     emitted += visible
                     yield sse("delta", {"content": visible})
+            elif event["type"] == "finish":
+                finish_reason = event.get("finish_reason")
         if stop_event.is_set():
             stopped = True
 
@@ -271,13 +276,16 @@ def _stream_ai_reply(conversation_id, stop_event, client_metadata=None):
             yield sse("delta", {"content": tail})
 
         minimum_characters = int(reply_settings.get("min_characters", 0))
-        current_characters = reply_length.count_reply_characters(emitted)
-        if (
-            minimum_characters
-            and current_characters < minimum_characters
-            and not stopped
-            and config.get("deepseek", {}).get("api_key")
-        ):
+        for _ in range(_MAX_CONTINUATION_ATTEMPTS):
+            current_characters = reply_length.count_reply_characters(emitted)
+            if not (
+                minimum_characters
+                and current_characters < minimum_characters
+                and not stopped
+                and finish_reason in ("stop", "length")
+                and config.get("deepseek", {}).get("api_key")
+            ):
+                break
             continuation_messages = [
                 *messages,
                 {"role": "assistant", "content": emitted},
@@ -285,37 +293,45 @@ def _stream_ai_reply(conversation_id, stop_event, client_metadata=None):
                     "role": "user",
                     "content": (
                         f"上一段可见正文只有 {current_characters} 个字，未达到最低 {minimum_characters} 个字。"
-                        f"请只补写新增剧情正文，使整段回复达到 {minimum_characters} 至 "
+                        f"请从上一句自然接续，使整段回复达到 {minimum_characters} 至 "
                         f"{reply_settings.get('max_characters', minimum_characters)} 个可见中文字符；"
-                        "不要重复上一段，不要输出 XML、JSON、选项或元数据，未达到最低字数前不要结束。"
+                        "只补充当前场景的环境、感官、动作、对话和情绪，不要重新开头、总结或重复；"
+                        "不要推进新的剧情阶段，不要引入新的判定、状态变化或选项，"
+                        "不要输出 XML、JSON 或元数据，未达到最低字数前不要结束。"
                     ),
                 },
             ]
             continuation_filter = adventure_engine.StructuredOutputFilter()
-            continuation_stream = client.stream_chat(
-                continuation_messages,
-                max_tokens=reply_settings["max_tokens"],
-            )
-            for event in continuation_stream:
-                if stop_event.is_set():
-                    stopped = True
-                    break
-                if event["type"] == "usage":
-                    usage = event.get("usage")
-                elif event["type"] == "delta":
-                    chunk = event.get("content") or ""
-                    if not chunk:
-                        continue
-                    visible = continuation_filter.feed(chunk)
-                    if visible:
-                        emitted += visible
-                        yield sse("delta", {"content": visible})
-            continuation_tail, _, _, continuation_options = continuation_filter.finish()
+            continuation_finish_reason = None
+            try:
+                continuation_stream = client.stream_chat(
+                    continuation_messages,
+                    max_tokens=reply_settings["max_tokens"],
+                )
+                for event in continuation_stream:
+                    if stop_event.is_set():
+                        stopped = True
+                        break
+                    if event["type"] == "usage":
+                        usage = event.get("usage")
+                    elif event["type"] == "delta":
+                        chunk = event.get("content") or ""
+                        if not chunk:
+                            continue
+                        visible = continuation_filter.feed(chunk)
+                        if visible:
+                            emitted += visible
+                            yield sse("delta", {"content": visible})
+                    elif event["type"] == "finish":
+                        continuation_finish_reason = event.get("finish_reason")
+            except DeepSeekError:
+                continuation_failed = True
+                break
+            continuation_tail, _, _, _ = continuation_filter.finish()
             if continuation_tail:
                 emitted += continuation_tail
                 yield sse("delta", {"content": continuation_tail})
-            if not options and continuation_options:
-                options = continuation_options
+            finish_reason = continuation_finish_reason
 
         latest_user_text = next(
             (
@@ -393,6 +409,7 @@ def _stream_ai_reply(conversation_id, stop_event, client_metadata=None):
             "state_delta": state_delta,
             "judge": judge_result["roll"] if judge_result else None,
             "options": options or [],
+            "continuation_failed": continuation_failed,
         }
         repositories.update_message(
             assistant_message["id"],

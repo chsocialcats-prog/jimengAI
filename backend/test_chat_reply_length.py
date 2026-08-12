@@ -148,12 +148,120 @@ class ChatReplyLengthTests(unittest.TestCase):
         self.assertEqual(len(client.calls), 2)
         self.assertEqual(client.calls[1]["messages"][-2]["role"], "assistant")
         self.assertEqual(client.calls[1]["messages"][-2]["content"], "短回复")
+        continuation_prompt = client.calls[1]["messages"][-1]["content"]
+        self.assertIn("从上一句自然接续", continuation_prompt)
+        self.assertIn("不要引入新的判定、状态变化或选项", continuation_prompt)
         deltas = [
             json.loads(event.split("data: ", 1)[1])["content"]
             for event in events
             if event.startswith("event: delta")
         ]
         self.assertGreaterEqual(sum(len(delta) for delta in deltas), 1000)
+
+    def test_short_reply_stops_after_two_continuation_attempts(self):
+        class AlwaysShortClient:
+            def __init__(self):
+                self.calls = []
+
+            def stream_chat(self, messages, max_tokens=None):
+                self.calls.append({"messages": messages, "max_tokens": max_tokens})
+                yield {"type": "delta", "content": "短"}
+                yield {"type": "finish", "finish_reason": "stop"}
+
+        client = AlwaysShortClient()
+        with patch.object(chat_routes, "create_client", return_value=client):
+            list(
+                chat_routes._stream_ai_reply(
+                    7,
+                    self.stop_event,
+                    {"reply_length": "detailed"},
+                )
+            )
+
+        self.assertEqual(len(client.calls), 3)
+        self.assertTrue(all(call["max_tokens"] == 4096 for call in client.calls))
+
+    def test_non_continuable_finish_reason_does_not_retry(self):
+        class FilteredClient:
+            def __init__(self):
+                self.calls = 0
+
+            def stream_chat(self, messages, max_tokens=None):
+                self.calls += 1
+                yield {"type": "delta", "content": "短回复"}
+                yield {"type": "finish", "finish_reason": "content_filter"}
+
+        client = FilteredClient()
+        with patch.object(chat_routes, "create_client", return_value=client):
+            list(
+                chat_routes._stream_ai_reply(
+                    7,
+                    self.stop_event,
+                    {"reply_length": "detailed"},
+                )
+            )
+
+        self.assertEqual(client.calls, 1)
+
+    def test_continuation_failure_preserves_completed_reply(self):
+        class FailingContinuationClient:
+            def __init__(self):
+                self.calls = 0
+
+            def stream_chat(self, messages, max_tokens=None):
+                self.calls += 1
+                if self.calls == 1:
+                    yield {"type": "delta", "content": "可用的首段"}
+                    yield {"type": "finish", "finish_reason": "stop"}
+                    return
+                raise chat_routes.DeepSeekError("continuation failed")
+
+        client = FailingContinuationClient()
+        with patch.object(
+            chat_routes, "create_client", return_value=client
+        ), patch.object(
+            chat_routes.repositories, "update_message"
+        ) as update_message:
+            events = list(
+                chat_routes._stream_ai_reply(
+                    7,
+                    self.stop_event,
+                    {"reply_length": "detailed"},
+                )
+            )
+
+        metadata = update_message.call_args.kwargs["metadata"]
+        self.assertEqual(client.calls, 2)
+        self.assertEqual(metadata["status"], "done")
+        self.assertTrue(metadata["continuation_failed"])
+        self.assertIn("event: done", "".join(events))
+        self.assertNotIn("event: error", "".join(events))
+
+    def test_user_stop_prevents_continuation(self):
+        stop_event = threading.Event()
+
+        class StoppedClient:
+            def __init__(self):
+                self.calls = 0
+
+            def stream_chat(self, messages, max_tokens=None):
+                self.calls += 1
+                yield {"type": "delta", "content": "已经生成的内容"}
+                stop_event.set()
+                yield {"type": "finish", "finish_reason": "stop"}
+
+        client = StoppedClient()
+        with patch.object(chat_routes, "create_client", return_value=client):
+            events = list(
+                chat_routes._stream_ai_reply(
+                    7,
+                    stop_event,
+                    {"reply_length": "detailed"},
+                )
+            )
+
+        self.assertEqual(client.calls, 1)
+        self.assertIn("（回复已停止）", "".join(events))
 
     def test_stream_chat_passes_client_metadata_to_ai_reply(self):
         metadata = {"reply_length": "short"}

@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const source = readFileSync(new URL("./js/main.js", import.meta.url), "utf8");
+const adventureSource = readFileSync(new URL("./js/adventure-page.mjs", import.meta.url), "utf8");
+const dataSource = readFileSync(new URL("./js/data.mjs", import.meta.url), "utf8");
 
 function sourceSection(startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -12,7 +14,15 @@ function sourceSection(startMarker, endMarker) {
   return source.slice(start, end);
 }
 
-const sendMessageSource = sourceSection(
+function adventureSection(startMarker, endMarker) {
+  const start = adventureSource.indexOf(startMarker);
+  const end = adventureSource.indexOf(endMarker, start);
+  assert.ok(start >= 0, `missing adventure source marker: ${startMarker}`);
+  assert.ok(end > start, `missing adventure source end marker: ${endMarker}`);
+  return adventureSource.slice(start, end);
+}
+
+const sendMessageSource = adventureSection(
   "async function sendMessage",
   "function stateSidebarHtml"
 );
@@ -26,14 +36,14 @@ const renderSettingsSource = sourceSection(
 );
 
 test("stream chat dispatches automatic context compression events", () => {
-  assert.match(source, /eventName === "context"/);
-  assert.match(source, /handlers\.onContext\?\.\(data\)/);
-  assert.match(source, /正在整理上下文/);
-  assert.match(source, /上下文已自动压缩/);
+  assert.match(dataSource, /eventName === "context"/);
+  assert.match(dataSource, /handlers\.onContext\?\.\(data\)/);
+  assert.match(adventureSource, /正在整理上下文/);
+  assert.match(adventureSource, /上下文已自动压缩/);
 
-  const sendMessage = source.slice(
-    source.indexOf("async function sendMessage"),
-    source.indexOf("function stateSidebarHtml")
+  const sendMessage = adventureSource.slice(
+    adventureSource.indexOf("async function sendMessage"),
+    adventureSource.indexOf("function stateSidebarHtml")
   );
   assert.match(sendMessage, /onContext: \(data\) =>/);
   assert.match(sendMessage, /data\?\.status === "compressing"/);
@@ -47,10 +57,10 @@ test("settings page exposes and saves context compression controls", () => {
     source.indexOf("async function renderSettings"),
     source.indexOf("function bindSettingsEvents")
   );
-  assert.match(settings, /context_window_tokens: 32768/);
-  assert.match(settings, /compression_trigger_ratio: 0\.75/);
-  assert.match(settings, /compression_keep_recent_messages: 8/);
-  assert.match(settings, /compression_summary_max_tokens: 1200/);
+  assert.match(dataSource, /context_window_tokens: 32768/);
+  assert.match(dataSource, /compression_trigger_ratio: 0\.75/);
+  assert.match(dataSource, /compression_keep_recent_messages: 8/);
+  assert.match(dataSource, /compression_summary_max_tokens: 1200/);
   assert.match(settings, /const contextWindowTokens = Number\(cfg\.generation\?\.context_window_tokens \?\? 32768\)/);
   assert.match(settings, /const compressionTriggerRatio = Number\(cfg\.generation\?\.compression_trigger_ratio \?\? 0\.75\)/);
   assert.match(settings, /const compressionKeepRecentMessages = Number\(cfg\.generation\?\.compression_keep_recent_messages \?\? 8\)/);
@@ -68,7 +78,9 @@ test("settings page exposes and saves context compression controls", () => {
   assert.match(saveSettings, /compression_trigger_ratio: readBoundedNumber\("#cfg-compression-ratio", 0\.75, 0\.50, 0\.95, 2\)/);
   assert.match(saveSettings, /compression_keep_recent_messages: readBoundedNumber\("#cfg-compression-keep-recent", 8, 2, 32\)/);
   assert.match(saveSettings, /compression_summary_max_tokens: readBoundedNumber\("#cfg-compression-summary-tokens", 1200, 256, 4096\)/);
-  assert.match(saveSettings, /if \(MODE === "offline"\)[\s\S]*localStorage\.setItem\(MOCK_SETTINGS_KEY, JSON\.stringify\(body\)\)[\s\S]*await api\("\/api\/config", \{ method: "PUT", body \}\)/);
+  assert.match(saveSettings, /await saveSettings\(body\)/);
+  assert.match(dataSource, /if \(MODE === "offline"\)[\s\S]*localStorage\.setItem\(MOCK_SETTINGS_KEY, JSON\.stringify\(settings\)\)/);
+  assert.match(dataSource, /request\("\/api\/config", \{ method: "PUT", body: settings \}\)/);
   assert.match(saveSettings, /if \(apiKey\) \{[\s\S]*body\.deepseek\.api_key = apiKey;/);
 });
 
@@ -198,10 +210,8 @@ test("renderSettings applies compression defaults to a partial saved config", as
   const renderSettings = new Function(
     "$",
     "MODE",
-    "localStorage",
-    "MOCK_SETTINGS_KEY",
-    "API_KEY_DRAFT_KEY",
-    "api",
+    "loadSettings",
+    "getApiKeyDraft",
     "appEl",
     "icon",
     "esc",
@@ -210,10 +220,8 @@ test("renderSettings applies compression defaults to a partial saved config", as
   )(
     () => null,
     "offline",
-    storage,
-    "mock-settings",
-    "api-key-draft",
-    async () => { throw new Error("offline API should not be called"); },
+    async () => JSON.parse(storage.getItem("mock-settings")),
+    () => "",
     appEl,
     () => "",
     (value) => String(value ?? ""),
@@ -268,34 +276,35 @@ test("settings save handler builds online and offline generation payloads", asyn
   };
   const bind = (mode, apiKey, storage, apiCalls) => {
     const { controls, query } = configureControls(apiKey);
-    const api = async (path, options) => {
-      apiCalls.push({ path, options });
-      return {};
+    const saveSettings = async (body) => {
+      if (mode === "offline") storage.setItem("mock-settings", JSON.stringify(body));
+      else apiCalls.push({ path: "/api/config", options: { method: "PUT", body } });
+      return body;
     };
     const bindSettings = new Function(
       "$",
       "MODE",
-      "localStorage",
-      "MOCK_SETTINGS_KEY",
-      "API_KEY_DRAFT_KEY",
-      "api",
+      "setApiKeyDraft",
+      "previewModels",
+      "saveSettings",
       "toast",
       "icon",
       "toItems",
-      "detectMode",
+      "detectDataMode",
+      "updateModeBadge",
       "renderSettings",
       `${bindSettingsSource}\nreturn bindSettingsEvents;`
     )(
       query,
       mode,
-      storage,
-      "mock-settings",
-      "api-key-draft",
-      api,
+      (value) => storage.setItem("api-key-draft", value),
+      async () => [],
+      saveSettings,
       () => {},
       () => "",
       () => [],
       async () => {},
+      () => {},
       async () => {}
     );
     bindSettings();

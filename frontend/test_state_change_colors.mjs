@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const source = readFileSync(new URL("./js/main.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("./js/adventure-page.mjs", import.meta.url), "utf8");
 
 test("聊天消息会为状态变化按类型添加语义化样式", () => {
-  assert.match(source, /function messageTextHtml\(content\)/);
-  assert.match(source, /function stateChangeLineHtml\(line\)/);
+  assert.match(source, /export function messageTextHtml\(content\)/);
+  assert.match(source, /export function stateChangeLineHtml\(line\)/);
   assert.match(source, /state-change-positive/);
   assert.match(source, /state-change-negative/);
   assert.match(source, /state-change-item-gain/);

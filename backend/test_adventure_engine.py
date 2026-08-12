@@ -43,7 +43,7 @@ class StateInstructionTests(unittest.TestCase):
 
         self.assertIn("玩家明确要求修改数值、物品、任务、关系或状态时，必须输出", prompt)
         self.assertIn('"attributes":{"心情":"+5"}', prompt)
-        self.assertIn("每次回复末尾都用“选项：”列出 2 到 4 个可执行行动", prompt)
+        self.assertIn("不要在剧情正文中重复列出选项", prompt)
         self.assertIn("除纯说明、查询或玩家明确要求不改变状态外，每次有效互动都必须", prompt)
 
 
