@@ -6,7 +6,11 @@ from .works import (
     _update_work_in_connection,
     get_work,
 )
-from .worldbooks import get_worldbook
+from .worldbooks import (
+    _insert_worldbook_entry_in_connection,
+    _update_worldbook_entry_in_connection,
+    get_worldbook,
+)
 
 
 def _save_bundle_entries(connection, worldbook_id, entries, now):
@@ -26,32 +30,13 @@ def _save_bundle_entries(connection, worldbook_id, entries, now):
         supplied_ids.append(entry_id)
 
     for entry in entries:
-        values = (
-            entry.get("title", ""),
-            database.json_dumps(entry.get("keywords", [])),
-            entry.get("content", ""),
-            int(entry.get("priority", 0)),
-            int(bool(entry.get("enabled", True))),
-            now,
-        )
         if entry.get("id") is None:
-            connection.execute(
-                """
-                INSERT INTO worldbook_entries (
-                    worldbook_id, title, keywords, content, priority, enabled,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (worldbook_id, *values[:-1], now, now),
+            _insert_worldbook_entry_in_connection(
+                connection, worldbook_id, entry, now=now
             )
         else:
-            connection.execute(
-                """
-                UPDATE worldbook_entries
-                SET title = ?, keywords = ?, content = ?, priority = ?, enabled = ?, updated_at = ?
-                WHERE id = ? AND worldbook_id = ?
-                """,
-                (*values, entry["id"], worldbook_id),
+            _update_worldbook_entry_in_connection(
+                connection, entry["id"], entry, now=now, worldbook_id=worldbook_id
             )
 
     omitted_ids = existing_ids - set(supplied_ids)

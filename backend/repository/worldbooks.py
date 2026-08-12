@@ -1,3 +1,5 @@
+from contextlib import closing
+
 from .. import database
 from .normalizers import clean_update_data
 
@@ -104,52 +106,67 @@ def get_worldbook_entry(entry_id):
     )
 
 
+def _entry_storage_values(data, now=None):
+    now = now or database.now_str()
+    return (
+        data.get("title", ""), database.json_dumps(data.get("keywords", [])),
+        data.get("content", ""), int(data.get("priority", 0)),
+        int(bool(data.get("enabled", True))), now,
+    )
+
+
+def _insert_worldbook_entry_in_connection(connection, worldbook_id, data, *, now=None):
+    values = _entry_storage_values(data, now)
+    return connection.execute(
+        "INSERT INTO worldbook_entries (worldbook_id, title, keywords, content, priority, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (worldbook_id, *values, values[-1]),
+    ).lastrowid
+
+
+def _update_worldbook_entry_in_connection(
+    connection, entry_id, data, *, now=None, worldbook_id=None
+):
+    now = now or database.now_str()
+    fields = clean_update_data(data)
+    values = _entry_storage_values(fields, now)
+    if worldbook_id is not None:
+        connection.execute(
+            "UPDATE worldbook_entries SET title = ?, keywords = ?, content = ?, priority = ?, enabled = ?, updated_at = ? WHERE id = ? AND worldbook_id = ?",
+            (*values, entry_id, worldbook_id),
+        )
+        return True
+
+    assignments = []
+    params = []
+    for key, index in (("title", 0), ("content", 2), ("priority", 3),
+                       ("keywords", 1), ("enabled", 4)):
+        if key in fields:
+            assignments.append(f"{key} = ?")
+            params.append(_entry_storage_values(fields, now)[index])
+    if not assignments:
+        return False
+    assignments.append("updated_at = ?")
+    params.extend([now, entry_id])
+    connection.execute(
+        f"UPDATE worldbook_entries SET {', '.join(assignments)} WHERE id = ?",
+        params,
+    )
+    return True
+
+
 def create_worldbook_entry(worldbook_id, data):
     """新增世界书条目。"""
-    now = database.now_str()
-    entry_id = database.execute(
-        """
-        INSERT INTO worldbook_entries (
-            worldbook_id, title, keywords, content, priority, enabled,
-            created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            worldbook_id,
-            data.get("title", ""),
-            database.json_dumps(data.get("keywords", [])),
-            data.get("content", ""),
-            int(data.get("priority", 0)),
-            int(bool(data.get("enabled", True))),
-            now,
-            now,
-        ),
-    )
+    with closing(database.connect()) as connection:
+        entry_id = _insert_worldbook_entry_in_connection(connection, worldbook_id, data)
+        connection.commit()
     return get_worldbook_entry(entry_id)
 
 
 def update_worldbook_entry(entry_id, data):
     """更新世界书条目。"""
-    fields = clean_update_data(data)
-    assignments = []
-    params = []
-    for key in ("title", "content", "priority"):
-        if key in fields:
-            assignments.append(f"{key} = ?")
-            params.append(fields[key])
-    if "keywords" in fields:
-        assignments.append("keywords = ?")
-        params.append(database.json_dumps(fields["keywords"]))
-    if "enabled" in fields:
-        assignments.append("enabled = ?")
-        params.append(int(bool(fields["enabled"])))
-    if assignments:
-        assignments.append("updated_at = ?")
-        params.append(database.now_str())
-        params.append(entry_id)
-        database.execute(
-            f"UPDATE worldbook_entries SET {', '.join(assignments)} WHERE id = ?", params
-        )
+    with closing(database.connect()) as connection:
+        if _update_worldbook_entry_in_connection(connection, entry_id, data):
+            connection.commit()
     return get_worldbook_entry(entry_id)
 
 
