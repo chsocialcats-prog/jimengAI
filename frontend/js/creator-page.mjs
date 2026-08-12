@@ -1,5 +1,6 @@
 import { icon } from "./icons.js";
 import { esc } from "./core/format.mjs";
+import { createDynamicRow, readDynamicRows } from "./form-rows.mjs";
 import {
   MODE,
   getWork,
@@ -28,20 +29,7 @@ const $ = (selector, root = document) => root.querySelector(selector);
 export function addDynamicRow(containerSelector, options = {}) {
   const container = $(containerSelector);
   if (!container) return;
-  const row = document.createElement("div");
-  row.className = "dynamic-row";
-  if (options.mode === "pair") {
-    row.innerHTML = `
-      <input class="input" placeholder="${esc(options.placeholders?.[0] || "名称")}">
-      <input class="input" placeholder="${esc(options.placeholders?.[1] || "说明")}">
-      <button type="button" class="btn btn-sm btn-ghost" title="删除">${icon("trash")}</button>`;
-  } else {
-    row.innerHTML = `
-      <input class="input" placeholder="${esc(options.placeholder || "内容")}">
-      <button type="button" class="btn btn-sm btn-ghost" title="删除">${icon("trash")}</button>`;
-  }
-  row.querySelector("button").addEventListener("click", () => row.remove());
-  container.appendChild(row);
+  container.appendChild(createDynamicRow(options));
 }
 
 export function addAttributeRow(selector, name = "", value = "") {
@@ -61,10 +49,7 @@ function populateAttributeRows(selector, attributes = {}) {
 
 export function collectAttributeRows(selector) {
   const result = {};
-  document.querySelectorAll(`${selector} .dynamic-row`).forEach((row) => {
-    const inputs = row.querySelectorAll("input");
-    const key = inputs[0]?.value.trim();
-    const rawValue = inputs[1]?.value.trim() || "";
+  readDynamicRows($(selector)).forEach(([key = "", rawValue = ""]) => {
     if (!key && !rawValue) return;
     if (!key) throw new Error("属性名称不能为空");
     if (Object.hasOwn(result, key)) throw new Error(`属性名称重复：${key}`);

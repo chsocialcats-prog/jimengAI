@@ -8,6 +8,7 @@ import {
   roleCardSummaryHtml,
   workCardIds,
 } from "./domain/role-cards.mjs";
+import { readDynamicRows } from "./form-rows.mjs";
 import {
   addAttributeRow,
   addDynamicRow,
@@ -625,17 +626,12 @@ function defaultCharacterAttributes(card = {}) {
 }
 
 function collectSingleRows(selector) {
-  return Array.from(document.querySelectorAll(`${selector} .dynamic-row input`))
-    .map((input) => input.value.trim())
-    .filter(Boolean);
+  return readDynamicRows($(selector)).flat().filter(Boolean);
 }
 
 function collectPairRows(selector) {
   const result = {};
-  document.querySelectorAll(`${selector} .dynamic-row`).forEach((row) => {
-    const inputs = row.querySelectorAll("input");
-    const key = inputs[0]?.value.trim();
-    const value = inputs[1]?.value.trim();
+  readDynamicRows($(selector)).forEach(([key = "", value = ""]) => {
     if (key) result[key] = value || "";
   });
   return result;
