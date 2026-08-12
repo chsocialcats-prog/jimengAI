@@ -1,77 +1,84 @@
 # AI 对话冒险平台
 
-个人自用、纯文字、20+ 成人向的 AI 对话冒险本地软件。
-使用 DeepSeek 官方 API（OpenAI 兼容格式），无图片、无语音、无账号系统。
+个人单机、单用户的中文 AI 文字冒险应用。后端使用 FastAPI、Uvicorn 和 SQLite，前端是无构建步骤的 HTML/CSS/ES module。配置 DeepSeek 兼容 API 后使用真实流式生成；未配置密钥时使用确定性的 mock 回复，前端在后端不可用时也保留离线演示数据。
 
-## 功能
+## 当前能力
 
-- 作品库：搜索、标签筛选、推荐/最新/热门排序
-- 作品详情：角色卡、世界书条目、开场剧情
-- 冒险页：流式对话、剧情选项、快捷指令、状态面板、存档读档
-- 创作台：创建角色卡、世界书和作品，支持导入 JSON 角色卡
-- 设置：DeepSeek Base URL、API Key、模型、温度、回复长度
-- 无 Key 时自动使用本地 Mock 回复；完全离线时使用内置演示数据
+- 作品库、作品详情和创作台
+- 有序多角色卡、角色卡独立库、世界书和关键词触发
+- 开局设定、玩家属性、回复模板和封面
+- SSE 流式对话、剧情选项、结构化状态变化和快捷指令
+- 上下文压缩、长期记忆、手动/自动存档、读档和会话分支
+- 在线 DeepSeek、后端 mock，以及前端离线兼容存储
 
-快捷指令支持中文和英文别名：`/状态`（`/status`）、`/背包`（`/inventory`）、`/存档`（`/save`）、`/帮助`（`/help`）。
+## 启动
 
-## 启动方式
-
-双击 `start.bat`，或在项目根目录运行：
+在项目根目录安装依赖并启动单个 Uvicorn 进程：
 
 ```powershell
+python -m pip install -r requirements.txt
 python start.py
 ```
 
-服务启动后会打开 `http://127.0.0.1:8000`。自动打开浏览器失败时，可手动访问该地址。
-
-本项目按单机、单进程模式设计；请使用上述启动方式，不要以多 worker / 多进程方式启动 Uvicorn。会话中的流式生成锁保存在当前服务进程内，用于保证同一会话不会同时生成多条回复。
-
-如需只启动服务、不打开浏览器：
+服务地址为 `http://127.0.0.1:8000`。自动打开浏览器时使用 `python start.py`；只启动服务时使用：
 
 ```powershell
 python start.py --no-browser
 ```
 
+应用依赖进程内的会话生成锁和停止事件，请不要使用 Uvicorn 多 worker 或多进程模式。
+
 ## 本地配置
 
-`config.json` 已包含 DeepSeek 配置占位：
+API 配置可通过应用设置页或环境变量提供：
 
-```json
-{
-  "deepseek": {
-    "base_url": "https://api.deepseek.com",
-    "model": "deepseek-chat",
-    "api_key": ""
-  }
-}
-```
+- `DEEPSEEK_API_KEY`
+- `DEEPSEEK_BASE_URL`
+- `DEEPSEEK_MODEL`
 
-把 API Key 填入 `api_key`，或设置环境变量 `DEEPSEEK_API_KEY` 即可。`/api/health` 的 `ai_enabled` 变为 `true` 后，对话会走 DeepSeek 流式接口。
+本地 `config.json` 可能包含真实密钥，不要读取、复制或提交其秘密值。SQLite 运行数据位于 `data/app.db`，也不应手动编辑或提交。
 
 ## 项目结构
 
 ```text
-ai模拟冒险/
-├── backend/                  # FastAPI 后端
-│   ├── ai/                   # DeepSeek 客户端与 mock 客户端
-│   ├── routers/              # API 路由
-│   ├── services/             # 冒险引擎、状态、骰子、存档
-│   ├── config.py             # 读取 config.json
-│   ├── database.py           # SQLite 自动初始化
-│   └── smoke_test.py         # 后端冒烟测试
-├── data/                     # SQLite 数据库目录
-├── docs/api-contract.md      # API 接口契约
-├── frontend/                 # 纯 HTML/CSS/JS 前端
-├── config.json               # DeepSeek 本地配置
-├── requirements.txt
-├── start.bat
-└── start.py
+backend/
+├── ai/                    DeepSeek/OpenAI 兼容客户端与 mock 客户端
+├── repository/            cards、works、worldbooks、conversations、snapshots
+├── routers/               配置、资源 CRUD、导入和 SSE 聊天路由
+├── services/              冒险引擎、上下文、状态、命令和存档服务
+├── database.py            SQLite 初始化与迁移
+├── schemas.py             API 请求模型
+└── smoke_test.py          运行中服务的后端冒烟测试
+frontend/
+├── index.html             应用壳和静态资源入口
+├── css/style.css          页面样式
+└── js/                    hash 路由、数据层、页面模块和聊天模块
+docs/
+├── api-contract.md        SSE 与兼容语义 notes
+├── superpowers/baselines/ 清理前行为基线
+└── archive/               历史计划、handoff 和一次性 QA 资源
+start.py                   Windows 启动器
 ```
 
 ## 测试
 
-后端服务启动后，在项目根目录运行：
+完整后端测试（包含根目录启动器测试迁移后的标准发现范围）：
 
 ```powershell
-python backend\smoke_test.py
+python -m unittest discover -s backend -p 'test_*.py'
 ```
+
+完整前端测试：
+
+```powershell
+$testFiles = Get-ChildItem -Path frontend -Filter 'test_*.mjs' | ForEach-Object { $_.FullName }
+node --test $testFiles
+```
+
+启动服务后可运行后端冒烟测试：
+
+```powershell
+python backend/smoke_test.py
+```
+
+当前 API 路由和 schema 以 `backend.main.app.openapi()`、`backend/schemas.py`、路由实现及测试为准；`docs/api-contract.md` 只保留流式事件与兼容行为，避免维护一份容易过期的完整 API 副本。
