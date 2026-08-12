@@ -315,7 +315,6 @@ def complete_conversation_onboarding(
         if key != "freeform" and value:
             accepted[str(key)[:80]] = value
     database.execute("UPDATE conversations SET onboarding_status = 'completed', onboarding_answers = ?, updated_at = ? WHERE id = ?", (database.json_dumps(accepted), database.now_str(), conversation_id))
-    opening = get_messages(conversation_id, limit=1)
     work = get_work(conversation.get("work_id")) if conversation.get("work_id") else None
     card = get_conversation_card(conversation)
     worldbook = get_worldbook(conversation.get("worldbook_id")) if conversation.get("worldbook_id") else None

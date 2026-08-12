@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Pydantic request models for backend APIs."""
 
-from typing import Any, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 

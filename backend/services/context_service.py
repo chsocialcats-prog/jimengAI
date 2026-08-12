@@ -63,14 +63,6 @@ def _truncate_to_token_budget(text, max_tokens):
     return best.rstrip()
 
 
-def _eligible_history(history):
-    return [
-        message
-        for message in history
-        if message.get("role") in ("user", "assistant")
-    ]
-
-
 def _escape_untrusted_prompt_text(value):
     """Escape delimiter markup before placing user data in a prompt."""
     return str(value or "").replace("<", r"\u003c").replace(">", r"\u003e")

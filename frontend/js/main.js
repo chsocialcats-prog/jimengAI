@@ -41,7 +41,6 @@ import {
   initializeData,
   listAllCards,
   listAllWorks,
-  listCards,
   listConversations,
   listWorks,
   loadSettings,
