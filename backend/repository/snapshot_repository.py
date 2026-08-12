@@ -66,6 +66,19 @@ def get_snapshot(snapshot_id, conversation_id=None, include_private=False):
     return row_to_snapshot(row, include_private=include_private)
 
 
+def _insert_snapshot(connection, values):
+    return connection.execute(
+        """
+        INSERT INTO snapshots (
+            conversation_id, name, state, messages, memory_summary,
+            memory_summary_covered_until_sequence, persona_corrections,
+            memory_corrections, branch_label, note, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        values,
+    ).lastrowid
+
+
 def create_snapshot(
     conversation_id,
     name="手动存档",
@@ -129,14 +142,8 @@ def create_snapshot(
                     ),
                 )
             else:
-                cursor = connection.execute(
-                    """
-                    INSERT INTO snapshots (
-                        conversation_id, name, state, messages, memory_summary,
-                        memory_summary_covered_until_sequence, persona_corrections,
-                        memory_corrections, branch_label, note, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
+                snapshot_id = _insert_snapshot(
+                    connection,
                     (
                         conversation_id,
                         "自动存档",
@@ -151,16 +158,9 @@ def create_snapshot(
                         now,
                     ),
                 )
-                snapshot_id = cursor.lastrowid
         else:
-            cursor = connection.execute(
-                """
-                INSERT INTO snapshots (
-                    conversation_id, name, state, messages, memory_summary,
-                    memory_summary_covered_until_sequence, persona_corrections,
-                    memory_corrections, branch_label, note, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+            snapshot_id = _insert_snapshot(
+                connection,
                 (
                     conversation_id,
                     name,
@@ -175,7 +175,6 @@ def create_snapshot(
                     now,
                 ),
             )
-            snapshot_id = cursor.lastrowid
         connection.commit()
     return get_snapshot(snapshot_id)
 
