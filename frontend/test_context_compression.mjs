@@ -1,36 +1,23 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
+import { readSource, sourceSection } from "./test_helpers.mjs";
 
-const source = readFileSync(new URL("./js/main.js", import.meta.url), "utf8");
-const adventureSource = readFileSync(new URL("./js/adventure-page.mjs", import.meta.url), "utf8");
-const dataSource = readFileSync(new URL("./js/data.mjs", import.meta.url), "utf8");
+const source = readSource("./js/main.js");
+const adventureSource = readSource("./js/adventure-page.mjs");
+const dataSource = readSource("./js/data.mjs");
 
-function sourceSection(startMarker, endMarker) {
-  const start = source.indexOf(startMarker);
-  const end = source.indexOf(endMarker, start);
-  assert.ok(start >= 0, `missing source marker: ${startMarker}`);
-  assert.ok(end > start, `missing source end marker: ${endMarker}`);
-  return source.slice(start, end);
-}
-
-function adventureSection(startMarker, endMarker) {
-  const start = adventureSource.indexOf(startMarker);
-  const end = adventureSource.indexOf(endMarker, start);
-  assert.ok(start >= 0, `missing adventure source marker: ${startMarker}`);
-  assert.ok(end > start, `missing adventure source end marker: ${endMarker}`);
-  return adventureSource.slice(start, end);
-}
-
-const sendMessageSource = adventureSection(
+const sendMessageSource = sourceSection(
+  adventureSource,
   "async function sendMessage",
   "function stateSidebarHtml"
 );
 const bindSettingsSource = sourceSection(
+  source,
   "function bindSettingsEvents",
   "function initTheme"
 );
 const renderSettingsSource = sourceSection(
+  source,
   "async function renderSettings",
   "function bindSettingsEvents"
 );
@@ -41,10 +28,7 @@ test("stream chat dispatches automatic context compression events", () => {
   assert.match(adventureSource, /正在整理上下文/);
   assert.match(adventureSource, /上下文已自动压缩/);
 
-  const sendMessage = adventureSource.slice(
-    adventureSource.indexOf("async function sendMessage"),
-    adventureSource.indexOf("function stateSidebarHtml")
-  );
+  const sendMessage = sendMessageSource;
   assert.match(sendMessage, /onContext: \(data\) =>/);
   assert.match(sendMessage, /data\?\.status === "compressing"/);
   assert.match(sendMessage, /data\?\.status === "compressed" \|\| data\?\.status === "fallback"/);
@@ -53,10 +37,7 @@ test("stream chat dispatches automatic context compression events", () => {
 });
 
 test("settings page exposes and saves context compression controls", () => {
-  const settings = source.slice(
-    source.indexOf("async function renderSettings"),
-    source.indexOf("function bindSettingsEvents")
-  );
+  const settings = renderSettingsSource;
   assert.match(dataSource, /context_window_tokens: 32768/);
   assert.match(dataSource, /compression_trigger_ratio: 0\.75/);
   assert.match(dataSource, /compression_keep_recent_messages: 8/);
@@ -70,10 +51,7 @@ test("settings page exposes and saves context compression controls", () => {
   assert.match(settings, /id="cfg-compression-keep-recent"[^>]+min="2"[^>]+max="32"[^>]+step="1"[^>]+value="\$\{compressionKeepRecentMessages\}"/);
   assert.match(settings, /id="cfg-compression-summary-tokens"[^>]+min="256"[^>]+max="4096"[^>]+step="1"[^>]+value="\$\{compressionSummaryMaxTokens\}"/);
 
-  const saveSettings = source.slice(
-    source.indexOf('$("#save-settings-btn")'),
-    source.indexOf('$("#test-btn")')
-  );
+  const saveSettings = sourceSection(source, '$("#save-settings-btn")', '$("#test-btn")');
   assert.match(saveSettings, /generation:\s*\{[\s\S]*context_window_tokens: readBoundedNumber\("#cfg-context-window", 32768, 2048, 131072\)/);
   assert.match(saveSettings, /compression_trigger_ratio: readBoundedNumber\("#cfg-compression-ratio", 0\.75, 0\.50, 0\.95, 2\)/);
   assert.match(saveSettings, /compression_keep_recent_messages: readBoundedNumber\("#cfg-compression-keep-recent", 8, 2, 32\)/);

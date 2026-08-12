@@ -1,20 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile } from "node:fs/promises";
 import {
   cardSummaryText,
   orderedWorkCards,
   resolveSessionCards,
   workCardIds,
 } from "./js/domain/role-cards.mjs";
+import { readSource, sourceSection } from "./test_helpers.mjs";
 
-const source = await readFile(new URL("./js/main.js", import.meta.url), "utf8");
-const adventureSource = await readFile(new URL("./js/adventure-page.mjs", import.meta.url), "utf8");
-const creatorSource = await readFile(new URL("./js/creator-page.mjs", import.meta.url), "utf8");
-const dataSource = await readFile(new URL("./js/data.mjs", import.meta.url), "utf8");
+const source = readSource("./js/main.js");
+const adventureSource = readSource("./js/adventure-page.mjs");
+const creatorSource = readSource("./js/creator-page.mjs");
+const dataSource = readSource("./js/data.mjs");
 
 function adventureRuntime({ conversation, workResult = null }) {
-  const adventure = sliceAdventureBetween("async function renderAdventure", "function openAdventureOnboarding");
+  const adventure = sourceSection(adventureSource, "async function renderAdventure", "function openAdventureOnboarding");
   const calls = { getWork: [], getWorldbook: [], navigate: [] };
   const backButton = { addEventListener(_type, handler) { this.handler = handler; } };
   const appEl = { innerHTML: "", addEventListener() {} };
@@ -116,18 +116,20 @@ test("online historical session without a work uses its frozen cards and convers
 });
 
 test("adventure and onboarding return links avoid a null work route", () => {
-  const bindings = sliceAdventureBetween("function bindAdventureEvents", "async function openCorrectionModal");
-  const onboarding = sliceAdventureBetween("async function renderOnboarding", "async function renderAdventure");
+  const bindings = sourceSection(adventureSource, "function bindAdventureEvents", "async function openCorrectionModal");
+  const onboarding = sourceSection(adventureSource, "async function renderOnboarding", "async function renderAdventure");
   assert.match(bindings, /session\.conv\.work_id\s*\?\s*`#\/work\/\$\{session\.conv\.work_id\}`\s*:\s*"#\/"/);
   assert.match(onboarding, /conversation\.work_id\s*\?\s*`#\/work\/\$\{conversation\.work_id\}`\s*:\s*"#\/"/);
 });
 
 test("adventure state and persona corrections consume resolved ordered session cards", () => {
-  const adventure = sliceAdventureBetween("async function renderAdventure", "function openAdventureOnboarding");
+  const adventure = sourceSection(adventureSource, "async function renderAdventure", "function openAdventureOnboarding");
   const correction = adventureSource.slice(adventureSource.indexOf("async function openCorrectionModal"));
-  const createStart = dataSource.indexOf("export async function createConversation");
-  const createEnd = dataSource.indexOf("export async function getConversation", createStart);
-  const createConversationSource = dataSource.slice(createStart, createEnd);
+  const createConversationSource = sourceSection(
+    dataSource,
+    "export async function createConversation",
+    "export async function getConversation"
+  );
   assert.match(adventure, /const cards = resolveSessionCards\(conv, work\);/);
   assert.match(adventure, /session = \{ conv, work, cards, card: cards\[0\] \|\| null,/);
   assert.match(correction, /session\.cards/);
@@ -137,33 +139,9 @@ test("adventure state and persona corrections consume resolved ordered session c
   assert.match(creatorSource, /player_attributes:\s*collectAttributeRows\("#player-attribute-rows"\)/);
 });
 
-function sliceBetween(startMarker, endMarker) {
-  const start = source.indexOf(startMarker);
-  const end = source.indexOf(endMarker, start);
-  assert.ok(start >= 0, `missing ${startMarker}`);
-  assert.ok(end > start, `missing ${endMarker}`);
-  return source.slice(start, end);
-}
-
-function sliceAdventureBetween(startMarker, endMarker) {
-  const start = adventureSource.indexOf(startMarker);
-  const end = adventureSource.indexOf(endMarker, start);
-  assert.ok(start >= 0, `missing adventure ${startMarker}`);
-  assert.ok(end > start, `missing adventure ${endMarker}`);
-  return adventureSource.slice(start, end);
-}
-
-function sliceCreatorBetween(startMarker, endMarker) {
-  const start = creatorSource.indexOf(startMarker);
-  const end = creatorSource.indexOf(endMarker, start);
-  assert.ok(start >= 0, `missing creator ${startMarker}`);
-  assert.ok(end > start, `missing creator ${endMarker}`);
-  return creatorSource.slice(start, end);
-}
-
 test("role-card editor hides player attributes while retaining legacy initial state on save", () => {
-  const editor = sliceBetween("async function renderCardEditor", "async function renderSettings");
-  const submit = sliceBetween("async function submitCardForm", "function bindCardEditorEvents");
+  const editor = sourceSection(source, "async function renderCardEditor", "async function renderSettings");
+  const submit = sourceSection(source, "async function submitCardForm", "function bindCardEditorEvents");
   assert.doesNotMatch(editor, /id="attribute-rows"/);
   assert.doesNotMatch(editor, /id="add-attribute"/);
   assert.match(editor, /id="character-attribute-rows"/);
@@ -174,8 +152,8 @@ test("role-card editor hides player attributes while retaining legacy initial st
 
 test("script settings render script-level attribute rows with explicit empty clearing", () => {
   const creator = creatorSource;
-  const fill = sliceCreatorBetween("function fillCreatorForm", "async function loadCreatorEditData");
-  const submit = sliceCreatorBetween("async function submitCreatorForm", "function bindCreatorEvents");
+  const fill = sourceSection(creatorSource, "function fillCreatorForm", "async function loadCreatorEditData");
+  const submit = sourceSection(creatorSource, "async function submitCreatorForm", "function bindCreatorEvents");
   assert.match(creator, /id="player-attribute-rows"/);
   assert.match(creator, /id="add-player-attribute"/);
   assert.match(fill, /populateAttributeRows\("#player-attribute-rows", work\.player_attributes/);
@@ -187,7 +165,7 @@ test("script settings render script-level attribute rows with explicit empty cle
 
 test("script settings manage unique role cards in visible order", () => {
   const creator = creatorSource;
-  const bindings = sliceCreatorBetween("function bindCreatorEvents", "export async function renderCreator");
+  const bindings = sourceSection(creatorSource, "function bindCreatorEvents", "export async function renderCreator");
   assert.match(creator, /id="work-card-rows"/);
   assert.match(creator, /id="work-card-add"/);
   assert.match(creator, /id="add-work-card"/);
@@ -202,7 +180,7 @@ test("script settings manage unique role cards in visible order", () => {
 
 test("legacy single-card scripts load as one card and save the multi-card API payload", () => {
   const creator = creatorSource;
-  const submit = sliceCreatorBetween("async function submitCreatorForm", "function bindCreatorEvents");
+  const submit = sourceSection(creatorSource, "async function submitCreatorForm", "function bindCreatorEvents");
   assert.deepEqual(workCardIds({ card_id: 3 }), [3]);
   assert.match(creator, /populateWorkCardRows\(cards, workCardIds\(editData\.work\)\)/);
   assert.match(submit, /card_ids:\s*collectWorkCardIds\(\)/);
@@ -213,7 +191,7 @@ test("legacy single-card scripts load as one card and save the multi-card API pa
 
 test("existing script loading keeps saving locked until work, cards, and selected card IDs initialize", () => {
   const creator = creatorSource;
-  const submit = sliceCreatorBetween("async function submitCreatorForm", "function bindCreatorEvents");
+  const submit = sourceSection(creatorSource, "async function submitCreatorForm", "function bindCreatorEvents");
 
   assert.match(creator, /id="creator-save-btn"[^>]* disabled/);
   assert.match(creator, /const \[editDataResult, cardsResult\] = await Promise\.allSettled\(\[/);
@@ -227,8 +205,8 @@ test("existing script loading keeps saving locked until work, cards, and selecte
 });
 
 test("referenced-card warnings include scripts using a non-first selected card", () => {
-  const references = sliceBetween("function referencedWorksForCard", "function referencedWorkNames");
-  const editor = sliceBetween("async function renderCardEditor", "async function renderSettings");
+  const references = sourceSection(source, "function referencedWorksForCard", "function referencedWorkNames");
+  const editor = sourceSection(source, "async function renderCardEditor", "async function renderSettings");
   assert.match(references, /workCardIds\(work\)\.includes\(Number\(cardId\)\)/);
   assert.match(editor, /引用剧本：\$\{referenceNames\}/);
   assert.match(editor, /已经开始的旧会话不会改变/);

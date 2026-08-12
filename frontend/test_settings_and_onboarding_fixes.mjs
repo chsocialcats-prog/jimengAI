@@ -1,15 +1,12 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
+import { readSource, sourceSection } from "./test_helpers.mjs";
 
-const source = readFileSync(new URL("./js/main.js", import.meta.url), "utf8");
-const adventureSource = readFileSync(new URL("./js/adventure-page.mjs", import.meta.url), "utf8");
+const source = readSource("./js/main.js");
+const adventureSource = readSource("./js/adventure-page.mjs");
 
 test("独立角色卡编辑器不提供初始数值关系编辑，并保留历史关系", () => {
-  const start = source.indexOf("async function submitCardForm");
-  const end = source.indexOf("async function renderSettings", start);
-  const cardEditor = source.slice(start, end);
-  assert.ok(start >= 0, "独立角色卡编辑器应存在");
+  const cardEditor = sourceSection(source, "async function submitCardForm", "async function renderSettings");
   assert.doesNotMatch(cardEditor, /id="initial-relation-rows"/);
   assert.doesNotMatch(cardEditor, /collectNumericPairRows\("#initial-relation-rows"\)/);
   assert.match(cardEditor, /relations: cardEditorState\.initialState\?\.relations \|\| \{\}/);
@@ -28,8 +25,6 @@ test("开局设定弹窗无论是否只读都能通过关闭按钮关闭", () =>
     source,
     /modalRoot\?\.addEventListener\("click", \(event\) => \{[\s\S]*?event\.target\.closest\("\[data-close\]"\)[\s\S]*?modalRoot\.innerHTML = "";/
   );
-  const start = adventureSource.indexOf("function openAdventureOnboarding");
-  const end = adventureSource.indexOf("function toggleStatusSidebar", start);
-  const onboarding = adventureSource.slice(start, end);
+  const onboarding = sourceSection(adventureSource, "function openAdventureOnboarding", "function toggleStatusSidebar");
   assert.match(onboarding, /type="button" data-close>关闭<\/button>/);
 });

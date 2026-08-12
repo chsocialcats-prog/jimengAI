@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import test from "node:test";
 import { normalizeMockReplyTemplateFields } from "./js/data.mjs";
+import { readSource, sourceSection } from "./test_helpers.mjs";
 
-const mainJs = fs.readFileSync(new URL("./js/main.js", import.meta.url), "utf8");
-const adventureJs = fs.readFileSync(new URL("./js/adventure-page.mjs", import.meta.url), "utf8");
-const creatorSource = fs.readFileSync(new URL("./js/creator-page.mjs", import.meta.url), "utf8");
-const css = fs.readFileSync(new URL("./css/style.css", import.meta.url), "utf8");
+const mainJs = readSource("./js/main.js");
+const adventureJs = readSource("./js/adventure-page.mjs");
+const creatorSource = readSource("./js/creator-page.mjs");
+const css = readSource("./css/style.css");
 
 function extractFunction(name) {
   const start = mainJs.indexOf(`function ${name}(`);
@@ -75,8 +75,6 @@ test("作品编辑器可以显式禁用模板并提交空活动 ID", () => {
 });
 
 test("聊天渲染区域没有模板切换控件", () => {
-  const adventureStart = adventureJs.indexOf("async function renderAdventure");
-  const adventureEnd = adventureJs.indexOf("function openAdventureOnboarding");
-  const adventureSource = adventureJs.slice(adventureStart, adventureEnd);
+  const adventureSource = sourceSection(adventureJs, "async function renderAdventure", "function openAdventureOnboarding");
   assert.doesNotMatch(adventureSource, /reply-template-rows|add-reply-template|reply-template-card/);
 });

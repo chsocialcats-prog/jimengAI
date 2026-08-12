@@ -1,17 +1,15 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
+import { readSource, sourceSection } from "./test_helpers.mjs";
 
-const mainJs = readFileSync(new URL("./js/main.js", import.meta.url), "utf8");
-const adventureJs = readFileSync(new URL("./js/adventure-page.mjs", import.meta.url), "utf8");
-const creatorJs = readFileSync(new URL("./js/creator-page.mjs", import.meta.url), "utf8");
-const dataJs = readFileSync(new URL("./js/data.mjs", import.meta.url), "utf8");
+const mainJs = readSource("./js/main.js");
+const adventureJs = readSource("./js/adventure-page.mjs");
+const creatorJs = readSource("./js/creator-page.mjs");
+const dataJs = readSource("./js/data.mjs");
 
 test("creator uses one transactional bundle request for create and update", () => {
-  const editStart = creatorJs.indexOf("async function saveCreatorEdit");
-  const submitStart = creatorJs.indexOf("async function submitCreatorForm");
-  const editSource = creatorJs.slice(editStart, submitStart);
-  const submitSource = creatorJs.slice(submitStart, creatorJs.indexOf("function bindCreatorEvents", submitStart));
+  const editSource = sourceSection(creatorJs, "async function saveCreatorEdit", "async function submitCreatorForm");
+  const submitSource = sourceSection(creatorJs, "async function submitCreatorForm", "function bindCreatorEvents");
 
   assert.match(editSource, /updateWorkBundle\(editState\.workId, editState\.worldbookId/);
   assert.match(submitSource, /saveWorkBundle\(\{ work, worldbook \}\)/);
@@ -21,11 +19,8 @@ test("creator uses one transactional bundle request for create and update", () =
 });
 
 test("creator supports works without worldbooks and keeps offline shared books synchronized", () => {
-  const loadStart = creatorJs.indexOf("async function loadCreatorEditData");
-  const saveStart = creatorJs.indexOf("async function saveCreatorEdit");
-  const submitStart = creatorJs.indexOf("async function submitCreatorForm");
-  const loadSource = creatorJs.slice(loadStart, creatorJs.indexOf("function areWorkCardIdsAvailable", loadStart));
-  const saveSource = creatorJs.slice(saveStart, submitStart);
+  const loadSource = sourceSection(creatorJs, "async function loadCreatorEditData", "function areWorkCardIdsAvailable");
+  const saveSource = sourceSection(creatorJs, "async function saveCreatorEdit", "async function submitCreatorForm");
 
   assert.match(loadSource, /if \(!worldbook\)/);
   assert.match(loadSource, /id: null/);
