@@ -3,30 +3,22 @@
 
 import asyncio
 import json
-import tempfile
 import unittest
-from pathlib import Path
-from unittest.mock import patch
-
 from backend import database, repositories
 from backend.main import app
+from backend.test_helpers import IsolatedDatabaseTestCase
 
 
-class ConversationRenameTests(unittest.TestCase):
+class ConversationRenameTests(IsolatedDatabaseTestCase):
     """Removing the rename route or its title validation breaks these API contracts."""
 
     def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.tempdir.name) / "test.db"
-        self.db_patch = patch.object(database, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        database.init_db()
+        super().setUp()
         work = repositories.create_work({"title": "Rename test work"})
         self.conversation = repositories.create_conversation(work["id"], "Before rename")
 
     def tearDown(self):
-        self.db_patch.stop()
-        self.tempdir.cleanup()
+        super().tearDown()
 
     def test_rename_returns_the_updated_conversation(self):
         status_code, body = self.request(

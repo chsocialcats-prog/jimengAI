@@ -1,26 +1,18 @@
 # -*- coding: utf-8 -*-
-import tempfile
 import unittest
 from contextlib import closing
-from pathlib import Path
-from unittest.mock import patch
-
 from backend import database, repositories
+from backend.test_helpers import IsolatedDatabaseTestCase
 
 
-class SnapshotCorrectionTests(unittest.TestCase):
+class SnapshotCorrectionTests(IsolatedDatabaseTestCase):
     def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.tempdir.name) / "test.db"
-        self.db_patch = patch.object(database, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        database.init_db()
+        super().setUp()
         work = repositories.create_work({"title": "测试剧本", "opening": "开场"})
         self.conversation = repositories.create_conversation(work["id"], "测试会话")
 
     def tearDown(self):
-        self.db_patch.stop()
-        self.tempdir.cleanup()
+        super().tearDown()
 
     def test_snapshot_restores_corrections_and_hides_them_from_public_results(self):
         conversation_id = self.conversation["id"]

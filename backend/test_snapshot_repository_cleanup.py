@@ -1,27 +1,20 @@
 from contextlib import closing
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 from backend import database, repositories
 from backend.repository import snapshot_repository
+from backend.test_helpers import IsolatedDatabaseTestCase
 
 
-class SnapshotRepositoryCleanupTests(unittest.TestCase):
+class SnapshotRepositoryCleanupTests(IsolatedDatabaseTestCase):
     def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(
-            database, "DB_PATH", Path(self.tempdir.name) / "test.db"
-        )
-        self.db_patch.start()
-        database.init_db()
+        super().setUp()
         work = repositories.create_work({"title": "test work", "opening": "opening"})
         self.conversation = repositories.create_conversation(work["id"], "test conversation")
 
     def tearDown(self):
-        self.db_patch.stop()
-        self.tempdir.cleanup()
+        super().tearDown()
 
     def test_manual_and_new_autosave_share_the_snapshot_insert_primitive(self):
         with patch.object(

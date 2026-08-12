@@ -1,26 +1,20 @@
 # -*- coding: utf-8 -*-
-import tempfile
 import unittest
 from contextlib import closing
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 from backend import database, repositories
+from backend.test_helpers import IsolatedDatabaseTestCase
 
 
-class ContextPersistenceTests(unittest.TestCase):
+class ContextPersistenceTests(IsolatedDatabaseTestCase):
     def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.tempdir.name) / "test.db"
-        self.db_patch = patch.object(database, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        database.init_db()
+        super().setUp()
         self.work = repositories.create_work({"title": "测试剧本", "opening": "开场"})
         self.conversation = repositories.create_conversation(self.work["id"], "测试会话")
 
     def tearDown(self):
-        self.db_patch.stop()
-        self.tempdir.cleanup()
+        super().tearDown()
 
     def test_summary_round_trip_preserves_coverage_and_compatibility(self):
         repositories.save_memory_summary(self.conversation["id"], "old events", 4)

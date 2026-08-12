@@ -1,24 +1,16 @@
 # -*- coding: utf-8 -*-
-import tempfile
 import unittest
-from pathlib import Path
-from unittest.mock import patch
-
 from backend import database, repositories
+from backend.test_helpers import IsolatedDatabaseTestCase
 
 
-class WorkBundleTests(unittest.TestCase):
+class WorkBundleTests(IsolatedDatabaseTestCase):
     def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.tempdir.name) / "test.db"
-        self.db_patch = patch.object(database, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        database.init_db()
+        super().setUp()
         self.card = repositories.create_card({"name": "角色", "persona": "设定"})
 
     def tearDown(self):
-        self.db_patch.stop()
-        self.tempdir.cleanup()
+        super().tearDown()
 
     def test_bundle_create_persists_work_worldbook_entries_and_card_order(self):
         result = repositories.save_work_bundle(

@@ -1,7 +1,5 @@
-import tempfile
 import unittest
 from contextlib import closing
-from pathlib import Path
 from unittest.mock import patch
 
 from fastapi import HTTPException
@@ -10,19 +8,15 @@ from backend import database, repositories
 from backend.routers import cards_routes, works_routes
 from backend.schemas import WorkUpdate
 from backend.services import adventure_engine
+from backend.test_helpers import IsolatedDatabaseTestCase
 
 
-class RoleCardLibraryTests(unittest.TestCase):
+class RoleCardLibraryTests(IsolatedDatabaseTestCase):
     def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.tempdir.name) / "test.db"
-        self.db_patch = patch.object(database, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        database.init_db()
+        super().setUp()
 
     def tearDown(self):
-        self.db_patch.stop()
-        self.tempdir.cleanup()
+        super().tearDown()
 
     def create_card(self):
         return repositories.create_card({"name": "测试角色"})
@@ -111,17 +105,12 @@ class RoleCardLibraryTests(unittest.TestCase):
         self.assertIsNone(updated["card_id"])
 
 
-class CardSnapshotTests(unittest.TestCase):
+class CardSnapshotTests(IsolatedDatabaseTestCase):
     def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.tempdir.name) / "test.db"
-        self.db_patch = patch.object(database, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        database.init_db()
+        super().setUp()
 
     def tearDown(self):
-        self.db_patch.stop()
-        self.tempdir.cleanup()
+        super().tearDown()
 
     def create_work_with_card(self, persona, **card_data):
         card = repositories.create_card(

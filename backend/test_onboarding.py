@@ -1,29 +1,21 @@
 # -*- coding: utf-8 -*-
 """会话开局引导的持久化与上下文回归测试。"""
 
-import tempfile
 import unittest
-from pathlib import Path
-from unittest.mock import patch
-
 from backend import database, repositories
 from backend.services import adventure_engine
+from backend.test_helpers import IsolatedDatabaseTestCase
 
 
-class OnboardingTests(unittest.TestCase):
+class OnboardingTests(IsolatedDatabaseTestCase):
     """移除引导配置快照或校验时，这些会话级行为必须失败。"""
 
     def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.tempdir.name) / "test.db"
-        self.db_patch = patch.object(database, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        database.init_db()
+        super().setUp()
         self.work = repositories.create_work({"title": "测试剧本", "opening": "开场"})
 
     def tearDown(self):
-        self.db_patch.stop()
-        self.tempdir.cleanup()
+        super().tearDown()
 
     def test_create_conversation_snapshots_work_onboarding(self):
         config = {

@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
 import json
 import sqlite3
-import tempfile
 import unittest
 from contextlib import closing
-from pathlib import Path
-from unittest.mock import patch
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -14,6 +11,7 @@ from backend import database, repositories
 from backend.routers import works_routes
 from backend.schemas import WorkCreate, WorkUpdate
 from backend.services import adventure_engine
+from backend.test_helpers import IsolatedDatabaseTestCase
 
 
 # This is intentionally a pre-Task-1 schema: it has neither of the new
@@ -89,16 +87,14 @@ CREATE TABLE memory_summaries (
 """
 
 
-class MultiRoleCardMigrationTests(unittest.TestCase):
+class MultiRoleCardMigrationTests(IsolatedDatabaseTestCase):
+    initialize_database = False
+
     def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.tempdir.name) / "test.db"
-        self.db_patch = patch.object(database, "DB_PATH", self.db_path)
-        self.db_patch.start()
+        super().setUp()
 
     def tearDown(self):
-        self.db_patch.stop()
-        self.tempdir.cleanup()
+        super().tearDown()
 
     def create_legacy_schema(self):
         with closing(sqlite3.connect(self.db_path)) as connection:
@@ -356,17 +352,12 @@ class MultiRoleCardMigrationTests(unittest.TestCase):
                     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'work_cards'"
                 ).fetchone()
             )
-class MultiRoleCardWorkApiTests(unittest.TestCase):
+class MultiRoleCardWorkApiTests(IsolatedDatabaseTestCase):
     def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.tempdir.name) / "test.db"
-        self.db_patch = patch.object(database, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        database.init_db()
+        super().setUp()
 
     def tearDown(self):
-        self.db_patch.stop()
-        self.tempdir.cleanup()
+        super().tearDown()
 
     def create_card(self, name):
         return repositories.create_card({"name": name})
@@ -467,17 +458,12 @@ class MultiRoleCardWorkApiTests(unittest.TestCase):
         self.assertEqual(repositories.get_work(work["id"])["card_ids"], [first["id"], second["id"]])
 
 
-class MultiRoleCardConversationTests(unittest.TestCase):
+class MultiRoleCardConversationTests(IsolatedDatabaseTestCase):
     def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.tempdir.name) / "test.db"
-        self.db_patch = patch.object(database, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        database.init_db()
+        super().setUp()
 
     def tearDown(self):
-        self.db_patch.stop()
-        self.tempdir.cleanup()
+        super().tearDown()
 
     def create_card(self, name, persona):
         return repositories.create_card({

@@ -1,26 +1,18 @@
 # -*- coding: utf-8 -*-
-import tempfile
 import unittest
 import sqlite3
-from pathlib import Path
-from unittest.mock import patch
-
 from backend import database, repositories
 from backend.schemas import WorkCreate
 from backend.services import adventure_engine
+from backend.test_helpers import IsolatedDatabaseTestCase
 
 
-class ReplyTemplateTests(unittest.TestCase):
+class ReplyTemplateTests(IsolatedDatabaseTestCase):
     def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.tempdir.name) / "test.db"
-        self.db_patch = patch.object(database, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        database.init_db()
+        super().setUp()
 
     def tearDown(self):
-        self.db_patch.stop()
-        self.tempdir.cleanup()
+        super().tearDown()
 
     def test_work_schema_accepts_multiple_reply_templates(self):
         payload = WorkCreate(
