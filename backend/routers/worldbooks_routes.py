@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """世界书与条目 CRUD 接口。"""
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 
 from .. import repositories
 from ..schemas import (
@@ -10,6 +10,11 @@ from ..schemas import (
     WorldbookEntryUpdate,
     WorldbookUpdate,
 )
+from ._error_helpers import (
+    _raise_no_update_fields,
+    _raise_not_found,
+    _raise_validation_error,
+)
 
 router = APIRouter(prefix="/api/worldbooks", tags=["世界书"])
 
@@ -17,20 +22,14 @@ router = APIRouter(prefix="/api/worldbooks", tags=["世界书"])
 def _get_worldbook_or_404(worldbook_id):
     worldbook = repositories.get_worldbook(worldbook_id)
     if worldbook is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": "世界书不存在"},
-        )
+        _raise_not_found("世界书不存在")
     return worldbook
 
 
 def _get_entry_or_404(entry_id, worldbook_id):
     entry = repositories.get_worldbook_entry(entry_id)
     if entry is None or entry["worldbook_id"] != worldbook_id:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": "世界书条目不存在"},
-        )
+        _raise_not_found("世界书条目不存在")
     return entry
 
 
@@ -46,10 +45,7 @@ def list_worldbooks(
 def create_worldbook(payload: WorldbookCreate):
     data = payload.model_dump()
     if not data.get("title", "").strip():
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": "世界书标题不能为空"},
-        )
+        _raise_validation_error("世界书标题不能为空")
     return repositories.create_worldbook(data)
 
 
@@ -63,15 +59,9 @@ def update_worldbook(worldbook_id: int, payload: WorldbookUpdate):
     _get_worldbook_or_404(worldbook_id)
     data = payload.model_dump(exclude_unset=True)
     if not data:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": "没有可更新的字段"},
-        )
+        _raise_no_update_fields()
     if data.get("title") is not None and not data["title"].strip():
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": "世界书标题不能为空"},
-        )
+        _raise_validation_error("世界书标题不能为空")
     return repositories.update_worldbook(worldbook_id, data)
 
 
@@ -102,10 +92,7 @@ def create_entry(worldbook_id: int, payload: WorldbookEntryCreate):
     _get_worldbook_or_404(worldbook_id)
     data = payload.model_dump()
     if not data.get("title", "").strip():
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": "条目标题不能为空"},
-        )
+        _raise_validation_error("条目标题不能为空")
     return repositories.create_worldbook_entry(worldbook_id, data)
 
 
@@ -121,15 +108,9 @@ def update_entry(
     _get_entry_or_404(entry_id, worldbook_id)
     data = payload.model_dump(exclude_unset=True)
     if not data:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": "没有可更新的字段"},
-        )
+        _raise_no_update_fields()
     if data.get("title") is not None and not data["title"].strip():
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": "条目标题不能为空"},
-        )
+        _raise_validation_error("条目标题不能为空")
     return repositories.update_worldbook_entry(entry_id, data)
 
 

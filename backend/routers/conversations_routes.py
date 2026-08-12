@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """冒险会话、状态、存档与显式判定接口。"""
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 
 from .. import repositories
 from ..schemas import (
@@ -14,6 +14,11 @@ from ..schemas import (
     StateUpdate,
 )
 from ..services import roll_service, snapshot_service, state_service
+from ._error_helpers import (
+    _raise_no_update_fields,
+    _raise_not_found,
+    _raise_validation_from_value_error,
+)
 
 router = APIRouter(prefix="/api/conversations", tags=["冒险会话"])
 
@@ -21,10 +26,7 @@ router = APIRouter(prefix="/api/conversations", tags=["冒险会话"])
 def _get_conversation_or_404(conversation_id):
     conversation = repositories.get_conversation(conversation_id)
     if conversation is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": "冒险会话不存在"},
-        )
+        _raise_not_found("冒险会话不存在")
     return conversation
 
 
@@ -45,10 +47,7 @@ def create_conversation(payload: ConversationCreate):
         payload.work_id, payload.title
     )
     if conversation is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": "作品不存在"},
-        )
+        _raise_not_found("作品不存在")
     return conversation
 
 
@@ -69,7 +68,7 @@ def complete_onboarding(conversation_id: int, payload: OnboardingComplete):
     try:
         return repositories.complete_conversation_onboarding(conversation_id, payload.answers)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail={"code": "validation_error", "message": str(exc)}) from exc
+        _raise_validation_from_value_error(exc)
 
 @router.post("/{conversation_id}/corrections", summary="保存会话修正")
 def add_correction(conversation_id: int, payload: ConversationCorrection):
@@ -77,7 +76,7 @@ def add_correction(conversation_id: int, payload: ConversationCorrection):
     try:
         return repositories.add_conversation_correction(conversation_id, payload.kind, payload.content)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail={"code": "validation_error", "message": str(exc)}) from exc
+        _raise_validation_from_value_error(exc)
 
 
 @router.delete("/{conversation_id}", status_code=204, summary="删除会话")
@@ -103,10 +102,7 @@ def update_state(conversation_id: int, payload: StateUpdate):
     _get_conversation_or_404(conversation_id)
     data = payload.model_dump(exclude_unset=True)
     if not data:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": "没有可更新的字段"},
-        )
+        _raise_no_update_fields()
     return state_service.update_state(conversation_id, data)
 
 
@@ -122,10 +118,7 @@ def roll(conversation_id: int, payload: RollRequest):
             reason=payload.reason,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": str(exc)},
-        ) from exc
+        _raise_validation_from_value_error(exc)
     return {
         "message": message,
         "state": state_service.get_state(conversation_id),
@@ -167,10 +160,7 @@ def restore_snapshot(conversation_id: int, snapshot_id: int):
     _get_conversation_or_404(conversation_id)
     state = snapshot_service.restore_snapshot(conversation_id, snapshot_id)
     if state is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": "存档不存在"},
-        )
+        _raise_not_found("存档不存在")
     return {
         "status": "restored",
         "conversation_id": conversation_id,
@@ -189,8 +179,5 @@ def restore_snapshot(conversation_id: int, snapshot_id: int):
 def delete_snapshot(conversation_id: int, snapshot_id: int):
     _get_conversation_or_404(conversation_id)
     if repositories.get_snapshot(snapshot_id, conversation_id) is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": "存档不存在"},
-        )
+        _raise_not_found("存档不存在")
     snapshot_service.delete_snapshot(conversation_id, snapshot_id)

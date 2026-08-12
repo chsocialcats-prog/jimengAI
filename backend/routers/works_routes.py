@@ -1,10 +1,16 @@
 # -*- coding: utf-8 -*-
 """作品 CRUD 接口。"""
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 
 from .. import repositories
 from ..schemas import WorkBundleCreate, WorkBundleUpdate, WorkCreate, WorkUpdate
+from ._error_helpers import (
+    _raise_no_update_fields,
+    _raise_not_found,
+    _raise_validation_error,
+    _raise_validation_from_value_error,
+)
 
 router = APIRouter(prefix="/api/works", tags=["作品"])
 
@@ -12,10 +18,7 @@ router = APIRouter(prefix="/api/works", tags=["作品"])
 def _get_work_or_404(work_id):
     work = repositories.get_work(work_id)
     if work is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": "作品不存在"},
-        )
+        _raise_not_found("作品不存在")
     return work
 
 
@@ -23,35 +26,23 @@ def _validate_references(data, *, for_update=False):
     try:
         card_ids = repositories.normalize_card_ids(data, for_update=for_update)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": str(exc)},
-        )
+        _raise_validation_from_value_error(exc, chain=False)
     if card_ids is not None:
         data["card_ids"] = card_ids
         for card_id in card_ids:
             if repositories.get_card(card_id) is None:
-                raise HTTPException(
-                    status_code=422,
-                    detail={"code": "validation_error", "message": "角色卡不存在"},
-                )
+                _raise_validation_error("角色卡不存在")
     if (
         data.get("worldbook_id") is not None
         and repositories.get_worldbook(data["worldbook_id"]) is None
     ):
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": "世界书不存在"},
-        )
+        _raise_validation_error("世界书不存在")
 
 
 def _validate_work_title(data, *, required=False):
     title = data.get("title")
     if (required and title is None) or (title is not None and not title.strip()):
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": "作品标题不能为空"},
-        )
+        _raise_validation_error("作品标题不能为空")
 
 
 @router.get("", summary="作品列表")
@@ -83,10 +74,7 @@ def create_work_bundle(payload: WorkBundleCreate):
     try:
         return repositories.save_work_bundle(work_data, worldbook_data)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": str(exc)},
-        )
+        _raise_validation_from_value_error(exc, chain=False)
 
 
 @router.get("/{work_id}", summary="作品详情")
@@ -99,10 +87,7 @@ def update_work(work_id: int, payload: WorkUpdate):
     _get_work_or_404(work_id)
     data = payload.model_dump(exclude_unset=True)
     if not data:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": "没有可更新的字段"},
-        )
+        _raise_no_update_fields()
     _validate_work_title(data)
     _validate_references(data, for_update=True)
     return repositories.update_work(work_id, data)
@@ -119,10 +104,7 @@ def update_work_bundle(work_id: int, payload: WorkBundleUpdate):
     try:
         result = repositories.save_work_bundle(work_data, worldbook_data, work_id=work_id)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": str(exc)},
-        )
+        _raise_validation_from_value_error(exc, chain=False)
     if result is None:
         return _get_work_or_404(work_id)
     return result

@@ -5,6 +5,11 @@ from fastapi import APIRouter, HTTPException, Query
 
 from .. import repositories
 from ..schemas import CardCreate, CardUpdate
+from ._error_helpers import (
+    _raise_no_update_fields,
+    _raise_not_found,
+    _raise_validation_error,
+)
 
 router = APIRouter(prefix="/api/cards", tags=["角色卡"])
 
@@ -12,10 +17,7 @@ router = APIRouter(prefix="/api/cards", tags=["角色卡"])
 def _get_card_or_404(card_id):
     card = repositories.get_card(card_id)
     if card is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": "角色卡不存在"},
-        )
+        _raise_not_found("角色卡不存在")
     return card
 
 
@@ -33,10 +35,7 @@ def list_cards(
 def create_card(payload: CardCreate):
     data = payload.model_dump()
     if not data.get("name", "").strip():
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": "角色名不能为空"},
-        )
+        _raise_validation_error("角色名不能为空")
     return repositories.create_card(data)
 
 
@@ -50,15 +49,9 @@ def update_card(card_id: int, payload: CardUpdate):
     _get_card_or_404(card_id)
     data = payload.model_dump(exclude_unset=True)
     if not data:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": "没有可更新的字段"},
-        )
+        _raise_no_update_fields()
     if data.get("name") is not None and not data["name"].strip():
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": "角色名不能为空"},
-        )
+        _raise_validation_error("角色名不能为空")
     return repositories.update_card(card_id, data)
 
 
