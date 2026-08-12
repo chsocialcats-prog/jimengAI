@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 import unittest
+from contextlib import closing
 from backend import database, repositories
+from backend.repository.works import (
+    _insert_work_in_connection,
+    _update_work_in_connection,
+)
 from backend.test_helpers import IsolatedDatabaseTestCase
 
 
@@ -11,6 +16,41 @@ class WorkBundleTests(IsolatedDatabaseTestCase):
 
     def tearDown(self):
         super().tearDown()
+
+    def test_connection_aware_work_writes_share_normalization_on_one_transaction(self):
+        with closing(database.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            work_id = _insert_work_in_connection(
+                connection,
+                {
+                    "title": "shared write",
+                    "card_ids": [self.card["id"]],
+                    "tags": ["tag"],
+                    "onboarding": {"enabled": True, "fields": []},
+                    "reply_templates": [{"id": "main", "content": "body"}],
+                    "active_reply_template_id": "main",
+                },
+                now="2026-08-12T00:00:00",
+            )
+            _update_work_in_connection(
+                connection,
+                work_id,
+                {
+                    "player_attributes": {"stamina": 4},
+                    "active_reply_template_id": "main",
+                    "card_ids": [],
+                },
+                now="2026-08-12T00:01:00",
+            )
+            connection.commit()
+
+        work = repositories.get_work(work_id)
+        self.assertEqual(work["card_ids"], [])
+        self.assertEqual(work["player_attributes"], {"stamina": 4})
+        self.assertEqual(work["tags"], ["tag"])
+        self.assertEqual(work["onboarding"]["enabled"], True)
+        self.assertEqual(work["reply_templates"], [{"id": "main", "name": "未命名模板", "content": "body"}])
+        self.assertEqual(work["active_reply_template_id"], "main")
 
     def test_bundle_create_persists_work_worldbook_entries_and_card_order(self):
         result = repositories.save_work_bundle(

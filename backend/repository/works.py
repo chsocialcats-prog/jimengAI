@@ -139,69 +139,98 @@ def get_work(work_id):
     return row_to_work(database.fetch_one("SELECT * FROM works WHERE id = ?", (work_id,)))
 
 
-def create_work(data, *, connect_fn=database.connect):
-    """新增作品。"""
-    now = database.now_str()
+_WORLD_BOOK_ID_UNSET = object()
+
+
+def _normalize_work_create_fields(data):
     card_ids = normalize_card_ids(data)
     player_attributes = normalize_player_attributes(data)
     reply_templates = validate_reply_templates(data.get("reply_templates", []))
-    active_reply_template_id = normalize_active_reply_template_id(
-        data.get("active_reply_template_id"), reply_templates
+    return {
+        "card_ids": card_ids,
+        "player_attributes": player_attributes,
+        "reply_templates": reply_templates,
+        "active_reply_template_id": normalize_active_reply_template_id(
+            data.get("active_reply_template_id"), reply_templates
+        ),
+    }
+
+
+def _insert_work_in_connection(
+    connection, data, *, now=None, worldbook_id=_WORLD_BOOK_ID_UNSET
+):
+    """Insert a work while the caller owns the surrounding transaction."""
+    now = now or database.now_str()
+    normalized = _normalize_work_create_fields(data)
+    resolved_worldbook_id = (
+        data.get("worldbook_id")
+        if worldbook_id is _WORLD_BOOK_ID_UNSET
+        else worldbook_id
     )
-    with closing(connect_fn()) as connection:
-        try:
-            connection.execute("BEGIN IMMEDIATE")
-            validate_card_ids(connection, card_ids)
-            work_id = connection.execute(
-                """
-                INSERT INTO works (
-                    title, description, card_id, player_attributes, worldbook_id, opening, tags, onboarding,
-                    cover_url, reply_templates, active_reply_template_id, is_archive, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    data.get("title", ""), data.get("description", ""), None,
-                    database.json_dumps(player_attributes), data.get("worldbook_id"), data.get("opening", ""),
-                    database.json_dumps(data.get("tags", [])),
-                    database.json_dumps(validate_onboarding(data.get("onboarding", {}))),
-                    data.get("cover_url", ""), database.json_dumps(reply_templates),
-                    active_reply_template_id, int(bool(data.get("is_archive", False))), now, now,
-                ),
-            ).lastrowid
-            replace_work_cards(connection, work_id, card_ids)
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
-    return get_work(work_id)
+    validate_card_ids(connection, normalized["card_ids"])
+    work_id = connection.execute(
+        """
+        INSERT INTO works (
+            title, description, card_id, player_attributes, worldbook_id, opening, tags, onboarding,
+            cover_url, reply_templates, active_reply_template_id, is_archive, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            data.get("title", ""), data.get("description", ""), None,
+            database.json_dumps(normalized["player_attributes"]), resolved_worldbook_id,
+            data.get("opening", ""), database.json_dumps(data.get("tags", [])),
+            database.json_dumps(validate_onboarding(data.get("onboarding", {}))),
+            data.get("cover_url", ""), database.json_dumps(normalized["reply_templates"]),
+            normalized["active_reply_template_id"],
+            int(bool(data.get("is_archive", False))), now, now,
+        ),
+    ).lastrowid
+    replace_work_cards(connection, work_id, normalized["card_ids"])
+    return work_id
 
 
-def update_work(work_id, data, *, connect_fn=database.connect):
-    """更新作品。"""
+def _normalize_work_update_fields(data, current_row, extra_fields=None):
     card_ids = normalize_card_ids(data, for_update=True)
     player_attributes = normalize_player_attributes(data, for_update=True)
     fields = clean_update_data(data)
     fields.pop("card_id", None)
     fields.pop("card_ids", None)
     fields.pop("player_attributes", None)
+    if extra_fields:
+        fields.update(extra_fields)
+    elif "worldbook_id" in data:
+        fields["worldbook_id"] = data["worldbook_id"]
     if "reply_templates" in fields or "active_reply_template_id" in fields:
-        current_work = get_work(work_id)
-        if current_work is None:
-            return None
+        current_templates = validate_reply_templates(
+            database.json_loads(current_row["reply_templates"], [])
+        )
         reply_templates = (
             validate_reply_templates(fields["reply_templates"])
             if "reply_templates" in fields
-            else current_work["reply_templates"]
+            else current_templates
         )
         fields["reply_templates"] = reply_templates
         fields["active_reply_template_id"] = normalize_active_reply_template_id(
-            fields.get(
-                "active_reply_template_id", current_work["active_reply_template_id"]
-            ),
+            fields.get("active_reply_template_id", current_row["active_reply_template_id"]),
             reply_templates,
         )
-    if "worldbook_id" in data:
-        fields["worldbook_id"] = data["worldbook_id"]
+    return card_ids, player_attributes, fields
+
+
+def _update_work_in_connection(
+    connection, work_id, data, *, now=None, current_row=None, extra_fields=None
+):
+    """Update a work while the caller owns the surrounding transaction."""
+    now = now or database.now_str()
+    if current_row is None:
+        current_row = connection.execute(
+            "SELECT * FROM works WHERE id = ?", (work_id,)
+        ).fetchone()
+    if current_row is None:
+        return None
+    card_ids, player_attributes, fields = _normalize_work_update_fields(
+        data, current_row, extra_fields
+    )
     assignments = []
     params = []
     for key in ("title", "description", "worldbook_id", "opening", "cover_url"):
@@ -226,26 +255,47 @@ def update_work(work_id, data, *, connect_fn=database.connect):
     if player_attributes is not None:
         assignments.append("player_attributes = ?")
         params.append(database.json_dumps(player_attributes))
-    if assignments or card_ids is not None:
-        assignments.append("updated_at = ?")
-        params.append(database.now_str())
-        params.append(work_id)
-        with closing(connect_fn()) as connection:
-            try:
-                connection.execute("BEGIN IMMEDIATE")
-                if card_ids is not None:
-                    validate_card_ids(connection, card_ids)
-                connection.execute(
-                    f"UPDATE works SET {', '.join(assignments)} WHERE id = ?", params
-                )
-                if card_ids is not None:
-                    replace_work_cards(connection, work_id, card_ids)
-                connection.commit()
-            except Exception:
-                connection.rollback()
-                raise
+    if not assignments and card_ids is None:
+        return False
+    assignments.append("updated_at = ?")
+    params.extend([now, work_id])
+    if card_ids is not None:
+        validate_card_ids(connection, card_ids)
+    connection.execute(
+        f"UPDATE works SET {', '.join(assignments)} WHERE id = ?", params
+    )
+    if card_ids is not None:
+        replace_work_cards(connection, work_id, card_ids)
+    return True
+
+
+def create_work(data, *, connect_fn=database.connect):
+    """新增作品。"""
+    with closing(connect_fn()) as connection:
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            work_id = _insert_work_in_connection(connection, data)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
     return get_work(work_id)
 
+
+def update_work(work_id, data, *, connect_fn=database.connect):
+    """更新作品。"""
+    with closing(connect_fn()) as connection:
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            changed = _update_work_in_connection(connection, work_id, data)
+            if changed is False:
+                connection.rollback()
+            else:
+                connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+    return get_work(work_id)
 
 def delete_work(work_id):
     """删除作品。"""

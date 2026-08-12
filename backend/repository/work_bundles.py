@@ -1,18 +1,10 @@
 from contextlib import closing
 
 from .. import database
-from .normalizers import (
-    clean_update_data,
-    normalize_active_reply_template_id,
-    validate_onboarding,
-    validate_reply_templates,
-)
 from .works import (
+    _insert_work_in_connection,
+    _update_work_in_connection,
     get_work,
-    normalize_card_ids,
-    normalize_player_attributes,
-    replace_work_cards,
-    validate_card_ids,
 )
 from .worldbooks import get_worldbook
 
@@ -78,10 +70,6 @@ def save_work_bundle(
     work_data = dict(work_data)
     worldbook_data = dict(worldbook_data)
     entries = [dict(entry) for entry in worldbook_data.pop("entries", [])]
-    card_ids = normalize_card_ids(work_data, for_update=work_id is not None)
-    player_attributes = normalize_player_attributes(
-        work_data, for_update=work_id is not None
-    )
     now = database.now_str()
 
     with closing(connect_fn()) as connection:
@@ -99,33 +87,9 @@ def save_work_bundle(
                 ).lastrowid
                 _save_bundle_entries(connection, worldbook_id, entries, now)
 
-                card_ids = card_ids or []
-                validate_card_ids(connection, card_ids)
-                reply_templates = validate_reply_templates(
-                    work_data.get("reply_templates", [])
+                work_id = _insert_work_in_connection(
+                    connection, work_data, now=now, worldbook_id=worldbook_id
                 )
-                active_reply_template_id = normalize_active_reply_template_id(
-                    work_data.get("active_reply_template_id"), reply_templates
-                )
-                work_id = connection.execute(
-                    """
-                    INSERT INTO works (
-                        title, description, card_id, player_attributes, worldbook_id, opening,
-                        tags, onboarding, cover_url, reply_templates, active_reply_template_id,
-                        is_archive, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        work_data.get("title", ""), work_data.get("description", ""), None,
-                        database.json_dumps(player_attributes or {}), worldbook_id,
-                        work_data.get("opening", ""), database.json_dumps(work_data.get("tags", [])),
-                        database.json_dumps(validate_onboarding(work_data.get("onboarding", {}))),
-                        work_data.get("cover_url", ""), database.json_dumps(reply_templates),
-                        active_reply_template_id, int(bool(work_data.get("is_archive", False))),
-                        now, now,
-                    ),
-                ).lastrowid
-                replace_work_cards(connection, work_id, card_ids)
             else:
                 current_row = connection.execute(
                     "SELECT * FROM works WHERE id = ?", (work_id,)
@@ -161,61 +125,14 @@ def save_work_bundle(
                     )
                 _save_bundle_entries(connection, worldbook_id, entries, now)
 
-                fields = clean_update_data(work_data)
-                fields.pop("card_id", None)
-                fields.pop("card_ids", None)
-                fields.pop("player_attributes", None)
-                current_templates = validate_reply_templates(
-                    database.json_loads(current_row["reply_templates"], [])
+                _update_work_in_connection(
+                    connection,
+                    work_id,
+                    work_data,
+                    now=now,
+                    current_row=current_row,
+                    extra_fields={"worldbook_id": worldbook_id},
                 )
-                reply_templates = (
-                    validate_reply_templates(fields["reply_templates"])
-                    if "reply_templates" in fields
-                    else current_templates
-                )
-                active_reply_template_id = normalize_active_reply_template_id(
-                    fields.get(
-                        "active_reply_template_id",
-                        current_row["active_reply_template_id"],
-                    ),
-                    reply_templates,
-                )
-                assignments = ["worldbook_id = ?"]
-                params = [worldbook_id]
-                for key in ("title", "description", "opening", "cover_url"):
-                    if key in fields:
-                        assignments.append(f"{key} = ?")
-                        params.append(fields[key])
-                if "tags" in fields:
-                    assignments.append("tags = ?")
-                    params.append(database.json_dumps(fields["tags"]))
-                if "onboarding" in fields:
-                    assignments.append("onboarding = ?")
-                    params.append(
-                        database.json_dumps(validate_onboarding(fields["onboarding"]))
-                    )
-                if "reply_templates" in fields or "active_reply_template_id" in fields:
-                    assignments.extend(
-                        ["reply_templates = ?", "active_reply_template_id = ?"]
-                    )
-                    params.extend(
-                        [database.json_dumps(reply_templates), active_reply_template_id]
-                    )
-                if "is_archive" in fields:
-                    assignments.append("is_archive = ?")
-                    params.append(int(bool(fields["is_archive"])))
-                if player_attributes is not None:
-                    assignments.append("player_attributes = ?")
-                    params.append(database.json_dumps(player_attributes))
-                assignments.append("updated_at = ?")
-                params.extend([now, work_id])
-                if card_ids is not None:
-                    validate_card_ids(connection, card_ids)
-                connection.execute(
-                    f"UPDATE works SET {', '.join(assignments)} WHERE id = ?", params
-                )
-                if card_ids is not None:
-                    replace_work_cards(connection, work_id, card_ids)
             connection.commit()
         except Exception:
             connection.rollback()
