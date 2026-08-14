@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS cards (
     directives TEXT NOT NULL DEFAULT '[]',
     initial_state TEXT NOT NULL DEFAULT '{}',
     character_attributes TEXT NOT NULL DEFAULT '{}',
+    avatar_url TEXT NOT NULL DEFAULT '',
     source TEXT NOT NULL DEFAULT 'local',
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
@@ -455,6 +456,12 @@ def init_db():
                 "cards",
                 "character_attributes",
                 "ALTER TABLE cards ADD COLUMN character_attributes TEXT NOT NULL DEFAULT '{}'",
+            )
+            _ensure_column(
+                connection,
+                "cards",
+                "avatar_url",
+                "ALTER TABLE cards ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''",
             )
             _ensure_column(
                 connection,

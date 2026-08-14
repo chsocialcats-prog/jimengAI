@@ -10,6 +10,7 @@ from .api_models.adventure import ConversationBranchCreate
 
 class CardCreate(BaseModel):
     name: str
+    avatar_url: str = ""
     persona: str = ""
     personality: str = ""
     speaking_style: str = ""
@@ -22,6 +23,7 @@ class CardCreate(BaseModel):
 
 class CardUpdate(BaseModel):
     name: Optional[str] = None
+    avatar_url: Optional[str] = None
     persona: Optional[str] = None
     personality: Optional[str] = None
     speaking_style: Optional[str] = None

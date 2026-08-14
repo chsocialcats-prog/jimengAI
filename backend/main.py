@@ -37,11 +37,22 @@ from .routers import (
     imports_routes,
     settings_routes,
     auth_routes,
+    uploads_routes,
     works_routes,
     worldbooks_routes,
 )
+from .services.image_uploads import UPLOAD_DIR
 
-FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend"
+PROJECT_DIR = Path(__file__).resolve().parents[1]
+LEGACY_FRONTEND_DIR = PROJECT_DIR / "frontend"
+NEXT_FRONTEND_DIR = PROJECT_DIR / "ai" / "ai" / "out"
+# The imported React UI is statically exported into ai/ai/out. Keep the legacy
+# static application as a startup-safe fallback until that build is available.
+FRONTEND_DIR = (
+    NEXT_FRONTEND_DIR
+    if (NEXT_FRONTEND_DIR / "index.html").is_file()
+    else LEGACY_FRONTEND_DIR
+)
 logger = logging.getLogger(__name__)
 
 
@@ -116,6 +127,7 @@ def health_check():
 for router in (
     auth_routes.router,
     settings_routes.router,
+    uploads_routes.router,
     cards_routes.router,
     imports_routes.router,
     worldbooks_routes.router,
@@ -129,4 +141,6 @@ for router in (
 app.add_middleware(AuthSecurityMiddleware)
 
 
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

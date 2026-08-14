@@ -11,3 +11,7 @@ class CredentialsRequest(BaseModel):
 class PasswordChangeRequest(BaseModel):
     current_password: str
     new_password: str
+
+
+class ProfileUpdateRequest(BaseModel):
+    avatar_url: str = Field(default="", max_length=2048)

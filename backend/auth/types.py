@@ -11,6 +11,7 @@ class PublicUser:
     id: int
     username: str
     created_at: str
+    avatar_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -30,4 +31,3 @@ class IssuedSession:
 class ConversationAccess:
     auth: AuthContext
     conversation: dict
-

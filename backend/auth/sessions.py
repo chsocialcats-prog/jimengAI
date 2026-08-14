@@ -52,7 +52,7 @@ class SessionService:
         if not isinstance(token, str) or not token:
             return None
         row = self.connection.execute(
-            """SELECT auth_sessions.*, users.username, users.created_at AS user_created_at, users.is_active
+            """SELECT auth_sessions.*, users.*, users.created_at AS user_created_at
                FROM auth_sessions JOIN users ON users.id = auth_sessions.user_id
                WHERE auth_sessions.token_hash = ?""",
             (_hash_token(token),),
@@ -75,7 +75,15 @@ class SessionService:
         if now - _parse(row["last_seen_at"]) >= _REFRESH_INTERVAL:
             self.connection.execute("UPDATE auth_sessions SET last_seen_at = ? WHERE id = ?", (_iso(now), row["id"]))
             self.connection.commit()
-        return AuthContext(PublicUser(row["user_id"], row["username"], row["user_created_at"]), row["id"])
+        return AuthContext(
+            PublicUser(
+                row["user_id"],
+                row["username"],
+                row["user_created_at"],
+                row["avatar_url"] if "avatar_url" in row.keys() else "",
+            ),
+            row["id"],
+        )
 
     def revoke_current(self, token: str) -> None:
         self.connection.execute("UPDATE auth_sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL", (_iso(self.clock()), _hash_token(token)))

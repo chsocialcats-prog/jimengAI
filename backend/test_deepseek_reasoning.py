@@ -167,11 +167,11 @@ class DeepSeekReasoningPayloadTests(unittest.TestCase):
 
             saved = json.loads(path.read_text(encoding="utf-8"))
 
-        self.assertEqual(loaded["generation"]["reasoning_effort"], "off")
-        self.assertEqual(public["generation"]["reasoning_effort"], "off")
+        self.assertEqual(loaded["generation"]["reasoning_effort"], "high")
+        self.assertEqual(public["generation"]["reasoning_effort"], "high")
         self.assertNotIn("api_key", public["deepseek"])
-        self.assertEqual(updated["generation"]["reasoning_effort"], "off")
-        self.assertEqual(saved["generation"]["reasoning_effort"], "off")
+        self.assertEqual(updated["generation"]["reasoning_effort"], "high")
+        self.assertEqual(saved["generation"]["reasoning_effort"], "high")
 
 
 if __name__ == "__main__":

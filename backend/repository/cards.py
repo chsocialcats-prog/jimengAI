@@ -64,9 +64,9 @@ def create_card(data, *, owner_user_id):
         """
         INSERT INTO cards (
             owner_user_id, name, persona, personality, speaking_style,
-            relationships, directives, initial_state, character_attributes, source,
-            created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            relationships, directives, initial_state, character_attributes, avatar_url,
+            source, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             owner_user_id, data.get("name", ""),
@@ -77,6 +77,7 @@ def create_card(data, *, owner_user_id):
             database.json_dumps(data.get("directives", [])),
             database.json_dumps(data.get("initial_state", {})),
             database.json_dumps(data.get("character_attributes", {})),
+            data.get("avatar_url", ""),
             data.get("source", "local"),
             now,
             now,
@@ -92,7 +93,7 @@ def update_card(card_id, data, *, owner_user_id):
         return get_card(card_id, viewer_user_id=owner_user_id)
     assignments = []
     params = []
-    for key in ("name", "persona", "personality", "speaking_style", "source"):
+    for key in ("name", "avatar_url", "persona", "personality", "speaking_style", "source"):
         if key in fields:
             assignments.append(f"{key} = ?")
             params.append(fields[key])

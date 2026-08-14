@@ -29,8 +29,8 @@ DEFAULT_CONFIG = {
     },
     "generation": {
         "temperature": 0.8,
-        "max_tokens": 2048,
-        "reasoning_effort": "off",
+        "max_tokens": 4096,
+        "reasoning_effort": "high",
         "context_window_tokens": 32768,
         "compression_trigger_ratio": 0.75,
         "compression_keep_recent_messages": 8,

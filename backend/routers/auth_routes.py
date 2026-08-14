@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
-from ..api_models.auth import CredentialsRequest, PasswordChangeRequest
+from ..api_models.auth import CredentialsRequest, PasswordChangeRequest, ProfileUpdateRequest
 from ..auth.account_migration import MigrationPending
 from ..auth.cookies import CSRF_COOKIE_NAME, apply_auth_cookies, clear_auth_cookies, set_no_store
 from ..auth.csrf import issue_csrf_token
@@ -15,7 +15,12 @@ router = APIRouter(prefix="/api/auth", tags=["认证"])
 
 
 def _public_user(user):
-    return {"id": user.id, "username": user.username, "created_at": user.created_at}
+    return {
+        "id": user.id,
+        "username": user.username,
+        "created_at": user.created_at,
+        "avatar_url": user.avatar_url,
+    }
 
 
 def _csrf(request, session_id=None):
@@ -104,6 +109,13 @@ def password(payload: PasswordChangeRequest, request: Request, response: Respons
         raise HTTPException(status_code=503, detail={"code": exc.code, "message": exc.message}) from exc
     token = _apply_login(response, request, issued)
     return {"authenticated": True, "user": _public_user(auth.user), "csrf_token": token}
+
+
+@router.put("/profile")
+def update_profile(payload: ProfileUpdateRequest, request: Request):
+    auth = require_auth(request)
+    user = request.app.state.auth_service.update_avatar(auth, payload.avatar_url)
+    return {"authenticated": True, "user": _public_user(user)}
 
 
 @router.post("/logout", status_code=204)

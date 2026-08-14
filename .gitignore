@@ -13,5 +13,6 @@ data/app.db-journal
 data/app.db-wal
 data/app.db-shm
 data/auth_keys.json
+data/uploads/
 data/test*/
 data/.test*/

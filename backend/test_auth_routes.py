@@ -16,7 +16,7 @@ def make_connection():
         """
         CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL,
             username_key TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, is_active INTEGER NOT NULL,
-            password_changed_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+            password_changed_at TEXT NOT NULL, avatar_url TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
         CREATE TABLE auth_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
             token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
             absolute_expires_at TEXT NOT NULL, revoked_at TEXT);
@@ -106,6 +106,23 @@ class AuthRouteTests(unittest.TestCase):
     def test_unsafe_requests_require_origin_and_csrf(self):
         forbidden = self.client.post("/api/auth/login", json={"username": "missing", "password": "correct horse battery"})
         self.assertEqual((forbidden.status_code, forbidden.json()["error"]["code"]), (403, "csrf_failed"))
+
+    def test_profile_avatar_is_persisted_and_returned_by_the_session(self):
+        registered = self.client.post(
+            "/api/auth/register",
+            json={"username": "Alice", "password": "correct horse battery"},
+            headers={"X-CSRF-Token": self.csrf(), "Origin": "http://testserver"},
+        )
+        self.assertEqual(registered.status_code, 201)
+        avatar_url = "/uploads/1/avatar.png"
+        updated = self.client.put(
+            "/api/auth/profile",
+            json={"avatar_url": avatar_url},
+            headers={"X-CSRF-Token": self.client.cookies.get("neko_csrf"), "Origin": "http://testserver"},
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["user"]["avatar_url"], avatar_url)
+        self.assertEqual(self.client.get("/api/auth/me").json()["user"]["avatar_url"], avatar_url)
 
     def test_security_rejection_clears_invalid_session_and_is_not_cacheable(self):
         token = self.csrf()

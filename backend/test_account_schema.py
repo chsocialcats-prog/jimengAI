@@ -125,6 +125,7 @@ class AccountSchemaMigrationTests(unittest.TestCase):
                         "password_hash",
                         "is_active",
                         "password_changed_at",
+                        "avatar_url",
                         "created_at",
                         "updated_at",
                     ],

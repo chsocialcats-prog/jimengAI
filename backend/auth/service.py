@@ -95,8 +95,12 @@ class AuthService:
                     return None, limit
                 raise InvalidCredentials()
             self.rate_limiter.record_login_success(client_ip, username)
-            user_row = connection.execute("SELECT id, username, created_at FROM users WHERE id = ?", (row["id"],)).fetchone()
-            return (PublicUser(user_row["id"], user_row["username"], user_row["created_at"]), SessionService(connection).issue(row["id"])), None
+            user_row = connection.execute("SELECT * FROM users WHERE id = ?", (row["id"],)).fetchone()
+            user = PublicUser(
+                user_row["id"], user_row["username"], user_row["created_at"],
+                user_row["avatar_url"] if "avatar_url" in user_row.keys() else "",
+            )
+            return (user, SessionService(connection).issue(row["id"])), None
 
     def change_password(self, auth, current_password, new_password):
         if self.keyring is None:
@@ -117,3 +121,14 @@ class AuthService:
         if token:
             with _connection_scope(self.connection_or_factory) as connection:
                 SessionService(connection).revoke_current(token)
+
+    def update_avatar(self, auth, avatar_url):
+        """Update the signed-in user's public avatar URL."""
+        with _connection_scope(self.connection_or_factory) as connection:
+            now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+            connection.execute(
+                "UPDATE users SET avatar_url = ?, updated_at = ? WHERE id = ?",
+                (avatar_url.strip(), now, auth.user.id),
+            )
+            connection.commit()
+        return PublicUser(auth.user.id, auth.user.username, auth.user.created_at, avatar_url.strip())

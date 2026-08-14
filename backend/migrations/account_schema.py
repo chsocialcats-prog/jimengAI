@@ -6,7 +6,7 @@ from __future__ import annotations
 import sqlite3
 
 
-ACCOUNT_SCHEMA_VERSION = 3
+ACCOUNT_SCHEMA_VERSION = 4
 ACCOUNT_MIGRATION_STATE_KEY = "account_migration_state"
 _VALID_MIGRATION_STATES = {"unclaimed", "needs_secret_cleanup", "complete"}
 
@@ -41,6 +41,7 @@ def _create_account_tables(connection: sqlite3.Connection) -> None:
             password_hash TEXT NOT NULL,
             is_active INTEGER NOT NULL DEFAULT 1,
             password_changed_at TEXT NOT NULL,
+            avatar_url TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
@@ -117,6 +118,15 @@ def _add_legacy_ownership_columns(connection: sqlite3.Connection) -> None:
             )
 
 
+def _add_user_profile_columns(connection: sqlite3.Connection) -> None:
+    _ensure_column(
+        connection,
+        "users",
+        "avatar_url",
+        "ALTER TABLE users ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''",
+    )
+
+
 def _ensure_migration_state(connection: sqlite3.Connection) -> None:
     row = connection.execute(
         "SELECT value FROM app_meta WHERE key = ?", (ACCOUNT_MIGRATION_STATE_KEY,)
@@ -139,6 +149,7 @@ def migrate_account_schema(connection: sqlite3.Connection) -> None:
     """
     connection.execute("PRAGMA foreign_keys = ON")
     _create_account_tables(connection)
+    _add_user_profile_columns(connection)
     _add_legacy_ownership_columns(connection)
     _ensure_migration_state(connection)
     current_version = connection.execute("PRAGMA user_version").fetchone()[0]
