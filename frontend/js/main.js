@@ -90,12 +90,14 @@ const accountControls = createAccountControls({
 const AGE_KEY = "adventure_age_confirmed";
 const THEME_KEY = "adventure_theme";
 const WORKSPACE_COLLAPSED_KEY = "adventure_workspace_collapsed";
+const WORKSPACE_RAIL_MOTION_MS = 280;
 let bypassAdventureLeavePrompt = false;
 let libraryFilter = { q: "", tag: "", sort: "recommend" };
 let cardEditorState = { cardId: null, initialState: {} };
 let cardLibraryQuery = "";
 let cardLibraryRenderToken = 0;
 let modeRefreshPromise = null;
+let workspaceRailMotionTimer = null;
 
 const $ = (selector, root = document) => root.querySelector(selector);
 
@@ -187,6 +189,18 @@ function openRailAiInquiry() {
 }
 
 function setWorkspaceCollapsed(collapsed, persist = true) {
+  const wasCollapsed = appShell?.classList.contains("workspace-collapsed") || false;
+  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+
+  window.clearTimeout(workspaceRailMotionTimer);
+  appShell?.classList.remove("workspace-rail-expanding");
+  if (!collapsed && wasCollapsed && !reducedMotion) {
+    appShell?.classList.add("workspace-rail-expanding");
+    workspaceRailMotionTimer = window.setTimeout(() => {
+      appShell?.classList.remove("workspace-rail-expanding");
+    }, WORKSPACE_RAIL_MOTION_MS);
+  }
+
   appShell?.classList.toggle("workspace-collapsed", collapsed);
   workspaceRail?.setAttribute("aria-expanded", String(!collapsed));
   updateWorkspaceToggle(collapsed);

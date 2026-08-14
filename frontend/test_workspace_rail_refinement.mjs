@@ -32,18 +32,21 @@ test("topbar gives the NEKO brand a larger visual anchor", () => {
   assert.match(cssSource, /\.topbar-brand \.brand-text\s*\{[\s\S]*font-size:\s*21px[\s\S]*letter-spacing:\s*0\.20em/);
 });
 
-test("workspace navigation uses a shared icon and text grid", () => {
+test("workspace navigation uses a shared fixed icon and text grid", () => {
   assert.match(cssSource, /\.workspace-nav a\s*\{[\s\S]*display:\s*grid/);
-  assert.match(cssSource, /grid-template-columns:\s*3px 18px minmax\(0, 1fr\) auto/);
-  assert.match(cssSource, /\.workspace-collapsed \.workspace-nav a\s*\{[\s\S]*grid-template-columns:\s*18px/);
-  assert.match(cssSource, /\.workspace-nav a\[data-nav="cards"\]::after/);
-  assert.match(cssSource, /content:\s*"CHARACTERS"/);
+  const fixedIconLayer = cssSource.slice(cssSource.lastIndexOf("/* Fixed icon rail"));
+  assert.match(fixedIconLayer, /--workspace-rail-icon-slot:\s*46px/);
+  assert.match(fixedIconLayer, /grid-template-columns:\s*var\(--workspace-rail-icon-slot\) minmax\(0, 1fr\) auto/);
+  assert.match(fixedIconLayer, /\.workspace-collapsed \.workspace-nav a\s*\{[\s\S]*grid-template-columns:\s*1fr/);
+  assert.match(fixedIconLayer, /\.workspace-nav a::before\s*\{[\s\S]*position:\s*absolute/);
 });
 
-test("collapsed role-card navigation keeps its icon color while hiding only the label", () => {
-  assert.match(cssSource, /\.workspace-collapsed \.workspace-nav a\[data-nav="cards"\]\s*\{[\s\S]*font-size:\s*0/);
-  assert.doesNotMatch(cssSource, /\.workspace-collapsed \.workspace-nav a\[data-nav="cards"\]\s*\{[\s\S]*color:\s*transparent/);
-  assert.match(cssSource, /\.workspace-collapsed \.workspace-nav a\s*>\s*svg\.icon\s*\{[\s\S]*grid-column:\s*1/);
+test("role-card navigation uses the same copy and hint structure as its peers", () => {
+  const cardLink = indexSource.match(/<a href="#\/cards"[\s\S]*?<\/a>/)?.[0] || "";
+  assert.match(cardLink, /<span class="nav-copy">角色卡<\/span>/);
+  assert.match(cardLink, /<span class="nav-hint">CHARACTERS<\/span>/);
+  assert.doesNotMatch(cssSource, /\.workspace-nav a\[data-nav="cards"\]::after/);
+  assert.doesNotMatch(cssSource, /legacy role-card text node/);
 });
 
 test("workspace rail uses a compact dock and an obvious collapse control", () => {
@@ -68,6 +71,48 @@ test("workspace navigation and lower tools use left alignment", () => {
   assert.match(cssSource, /\.workspace-nav a\s*\{[\s\S]*justify-content:\s*start/);
   assert.match(cssSource, /\.workspace-nav a \.nav-copy\s*\{[\s\S]*text-align:\s*left/);
   assert.match(cssSource, /\.rail-ai-button\s*\{[\s\S]*text-align:\s*left/);
+});
+
+test("collapsed desktop rail gives every tool one fixed vertical rhythm", () => {
+  const collapsedRailLayer = cssSource.slice(cssSource.lastIndexOf("/* Collapsed desktop rail"));
+  assert.match(collapsedRailLayer, /@media \(min-width:\s*721px\)/);
+  assert.match(collapsedRailLayer, /--workspace-rail-control-size:\s*48px/);
+  assert.match(collapsedRailLayer, /--workspace-rail-control-gap:\s*16px/);
+  assert.match(collapsedRailLayer, /\.workspace-collapsed \.workspace-nav a,\s*[\s\S]*\.workspace-collapsed \.rail-ai-button,\s*[\s\S]*\.workspace-collapsed \.workspace-rail-footer \.icon-btn/);
+  assert.match(collapsedRailLayer, /\.workspace-collapsed \.workspace-rail-lower\s*\{[\s\S]*gap:\s*var\(--workspace-rail-control-gap\)/);
+});
+
+test("expanded and collapsed desktop rails share one fixed control grid", () => {
+  const actionHeightLayer = cssSource.slice(cssSource.lastIndexOf("/* Expanded and collapsed desktop rails"));
+  assert.match(actionHeightLayer, /--workspace-rail-control-size:\s*48px/);
+  assert.match(actionHeightLayer, /--workspace-rail-control-gap:\s*16px/);
+  assert.match(actionHeightLayer, /\.workspace-nav\s*\{[\s\S]*gap:\s*var\(--workspace-rail-control-gap\)[\s\S]*margin-top:\s*0/);
+  assert.match(actionHeightLayer, /\.workspace-rail-lower\s*\{[\s\S]*gap:\s*var\(--workspace-rail-control-gap\)[\s\S]*margin-top:\s*var\(--workspace-rail-control-gap\)/);
+  assert.match(actionHeightLayer, /\.workspace-nav a,\s*[\s\S]*\.rail-ai-button,\s*[\s\S]*\.workspace-rail-footer \.icon-btn/);
+  assert.match(actionHeightLayer, /height:\s*var\(--workspace-rail-control-size\)/);
+  assert.match(actionHeightLayer, /\.rail-ai-button\s*\{[\s\S]*margin:\s*0[\s\S]*padding-top:\s*8px[\s\S]*padding-bottom:\s*8px/);
+  assert.match(actionHeightLayer, /\.workspace-rail-footer\s*\{[\s\S]*margin:\s*0[\s\S]*padding:\s*0[\s\S]*border-top:\s*0/);
+});
+
+test("expanded rail keeps its internal icon anchors fixed while copy opens to the right", () => {
+  const fixedIconLayer = cssSource.slice(cssSource.lastIndexOf("/* Fixed icon rail"));
+  assert.match(fixedIconLayer, /\.workspace-rail\s*\{[\s\S]*padding-inline:\s*10px/);
+  assert.match(fixedIconLayer, /\.workspace-nav a > svg\.icon\s*\{[\s\S]*grid-column:\s*1[\s\S]*justify-self:\s*center/);
+  assert.match(fixedIconLayer, /\.rail-ai-button\s*\{[\s\S]*gap:\s*22px[\s\S]*padding-left:\s*8px/);
+  assert.match(fixedIconLayer, /\.workspace-rail-footer\s*\{[\s\S]*justify-content:\s*flex-start/);
+  assert.match(fixedIconLayer, /\.workspace-collapsed \.workspace-nav\s*\{[\s\S]*align-items:\s*flex-start/);
+  assert.match(fixedIconLayer, /\.workspace-collapsed \.rail-ai-button\s*\{[\s\S]*gap:\s*0[\s\S]*padding:\s*0/);
+});
+
+test("rail expansion synchronizes layout movement with delayed copy reveal", () => {
+  const railMotionLayer = cssSource.slice(cssSource.lastIndexOf("/* Rail expansion"));
+  assert.match(mainSource, /const WORKSPACE_RAIL_MOTION_MS = 280/);
+  assert.match(mainSource, /workspace-rail-expanding/);
+  assert.match(mainSource, /prefers-reduced-motion: reduce/);
+  assert.match(railMotionLayer, /\.app-frame\s*\{[\s\S]*transition:\s*padding-left 280ms/);
+  assert.match(railMotionLayer, /\.app-shell > \.workspace-edge-toggle\s*\{[\s\S]*transition:\s*left 280ms/);
+  assert.match(railMotionLayer, /\.app-shell\.workspace-rail-expanding \.workspace-nav \.nav-copy/);
+  assert.match(railMotionLayer, /animation:\s*workspace-rail-copy-in 160ms 100ms/);
 });
 
 test("rail provides an AI inquiry entry point", () => {

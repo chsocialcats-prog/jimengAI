@@ -10,7 +10,7 @@ const creatorJs = await readFile(new URL("./js/creator-page.mjs", import.meta.ur
 const dataJs = await readFile(new URL("./js/data.mjs", import.meta.url), "utf8");
 
 test("top navigation exposes the role-card library", () => {
-  assert.match(indexHtml, /<a href="#\/cards" data-nav="cards" data-icon="users">角色卡<\/a>/);
+  assert.match(indexHtml, /<a href="#\/cards" data-nav="cards" data-icon="users"><span class="nav-copy">角色卡<\/span><span class="nav-hint">CHARACTERS<\/span><\/a>/);
 });
 
 test("role cards have independent offline storage and CRUD helpers", () => {

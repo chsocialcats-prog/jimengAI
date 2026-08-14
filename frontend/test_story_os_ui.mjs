@@ -27,8 +27,9 @@ test("工作区收起状态使用独立的本地偏好", () => {
   assert.match(mainSource, /workspace-collapsed/);
 });
 
-test("工作区收起时隐藏角色卡文字节点", () => {
-  assert.match(cssSource, /\.workspace-collapsed \.workspace-nav a\[data-nav="cards"\]\s*\{[\s\S]*font-size:\s*0/);
+test("工作区收起时统一隐藏导航文字列", () => {
+  assert.match(cssSource, /\.workspace-collapsed \.nav-copy,\s*[\s\S]*\.workspace-collapsed \.nav-hint\s*,?[\s\S]*\{\s*display:\s*none/);
+  assert.doesNotMatch(cssSource, /\.workspace-collapsed \.workspace-nav a\[data-nav="cards"\]/);
 });
 
 test("导航图标挂载不会覆盖导航文字", () => {
@@ -65,13 +66,23 @@ test("冒险页默认将状态面板收进阅读区", () => {
   assert.match(adventureSource, /sidebarToggle\?\.setAttribute\("aria-expanded", "true"\)/);
 });
 
-test("Story OS 视觉 token 与响应式可访问性规则存在", () => {
-  assert.match(cssSource, /--story-night:\s*#f7f8fa/i);
-  assert.match(cssSource, /--story-indigo:\s*#ffffff/i);
-  assert.match(cssSource, /--story-violet:\s*#167c78/i);
-  assert.match(cssSource, /--story-coral:\s*#c65f4b/i);
-  assert.match(cssSource, /:root\[data-theme="dark"\][\s\S]*--bg:\s*#121417[\s\S]*--accent:\s*#62b6af/i);
-  assert.doesNotMatch(cssSource, /radial-gradient|#9a85ff|#6f5bd7|#6970e8/i);
+test("Story OS 使用黑白灰与透明视觉 token", () => {
+  const visualLayer = cssSource.slice(cssSource.lastIndexOf("NEKO Narrative Workspace"));
+  assert.match(visualLayer, /--bg:\s*#f6f6f6/i);
+  assert.match(visualLayer, /--text:\s*#141414/i);
+  assert.match(visualLayer, /--accent:\s*#161616/i);
+  assert.match(visualLayer, /--accent-2:\s*#4a4a4a/i);
+  assert.match(visualLayer, /--ok:\s*#343434/i);
+  assert.match(visualLayer, /--warning:\s*#626262/i);
+  assert.match(visualLayer, /--user-bubble:\s*#ededed/i);
+  assert.match(visualLayer, /:root\[data-theme="dark"\]\s*\{[\s\S]*--bg:\s*#121212[\s\S]*--accent:\s*#f5f5f5[\s\S]*--ok:\s*#e0e0e0/i);
+  for (const match of visualLayer.matchAll(/#([0-9a-f]{6})/gi)) {
+    const [red, green, blue] = match[1].match(/../g).map((component) => Number.parseInt(component, 16));
+    assert.equal(red, green, `expected grayscale color ${match[0]}`);
+    assert.equal(green, blue, `expected grayscale color ${match[0]}`);
+  }
+  assert.doesNotMatch(visualLayer, /gradient/i);
+  assert.match(visualLayer, /\.message\.ai\s*\{[\s\S]*border-left:\s*2px solid var\(--story-violet\)[\s\S]*font-family:\s*var\(--story-display\)/);
   assert.match(cssSource, /\.workspace-rail\s*\{/);
   assert.match(cssSource, /\.library-featured\s*\{/);
   assert.match(cssSource, /\.story-context\s*\{/);
