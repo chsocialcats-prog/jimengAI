@@ -1,0 +1,15 @@
+# 文本文件统一使用 LF（与仓库 index 现有约定一致）
+* text=auto eol=lf
+
+# 本地配置文件保持原样（可能含密钥，也避免 diff 暴露其值）
+config.json -text
+
+# 二进制资源不做换行转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.moc binary
+*.mp3 binary

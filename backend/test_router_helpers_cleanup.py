@@ -24,7 +24,7 @@ class RouterErrorHelperContractTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as helper_error:
             helpers._raise_not_found("角色卡不存在")
 
-        with patch.object(cards_routes.repositories, "get_card", return_value=None):
+        with patch.object(cards_routes.card_repository, "get_card", return_value=None):
             with self.assertRaises(HTTPException) as route_error:
                 cards_routes._get_card_or_404(7)
 

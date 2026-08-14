@@ -5,32 +5,64 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <title>NEKO · AI 对话冒险</title>
-  <link rel="stylesheet" href="css/style.css">
+  <script>
+    (() => {
+      let savedTheme = null;
+      try { savedTheme = localStorage.getItem("adventure_theme"); } catch {}
+      document.documentElement.dataset.theme = savedTheme === "dark" ? "dark" : "light";
+    })();
+  </script>
+  <link rel="stylesheet" href="css/style.css?v=account-ui-1">
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <a class="brand" href="#/" aria-label="返回作品库">
+      <a class="brand topbar-brand" href="#/" aria-label="返回作品库">
         <img class="brand-logo" src="assets/neko-icon.png" alt="">
         <span class="brand-text">NEKO</span>
       </a>
-      <nav class="nav-links" aria-label="主导航">
-        <a href="#/" data-nav="library" data-icon="book">作品库</a>
-        <a href="#/creator" data-nav="creator" data-icon="pen">创作台</a>
-        <a href="#/cards" data-nav="cards" data-icon="users">角色卡</a>
-        <a href="#/settings" data-nav="settings" data-icon="settings">设置</a>
-      </nav>
+      <div class="topbar-search" role="search">
+        <span class="topbar-search-icon" data-icon="search" aria-hidden="true"></span>
+        <input id="global-search" type="search" placeholder="搜索作品、角色卡或章节" aria-label="搜索作品、角色卡或章节" autocomplete="off">
+        <kbd aria-hidden="true">/</kbd>
+      </div>
       <div class="top-actions">
         <span class="mode-badge" id="mode-badge" title="当前数据模式">检测中</span>
-        <button class="icon-btn" id="theme-toggle" type="button" aria-label="切换明亮模式" data-icon="moon"></button>
+        <div id="auth-nav" class="auth-nav" aria-live="polite"></div>
       </div>
     </header>
-    <main id="app" tabindex="-1"></main>
+    <aside class="workspace-rail" id="workspace-rail" aria-label="故事工作区">
+      <nav class="workspace-nav nav-links" aria-label="主导航">
+        <a href="#/" data-nav="library" data-icon="book"><span class="nav-copy">作品库</span><span class="nav-hint">LIBRARY</span></a>
+        <a href="#/creator" data-nav="creator" data-icon="pen"><span class="nav-copy">创作台</span><span class="nav-hint">CREATE</span></a>
+        <a href="#/cards" data-nav="cards" data-icon="users">角色卡</a>
+        <a href="#/worldbooks" data-nav="worldbooks" data-icon="book"><span class="nav-copy">世界书</span><span class="nav-hint">WORLD</span></a>
+      </nav>
+      <div class="workspace-rail-lower">
+        <button class="rail-ai-button" id="rail-ai-inquiry" type="button" aria-label="打开 AI 询问系统" title="打开 AI 询问系统">
+          <span class="rail-ai-icon" data-icon="sparkles"></span>
+          <span class="rail-ai-copy"><strong>AI 询问</strong><small>ASK NEKO</small></span>
+        </button>
+        <div class="workspace-rail-footer">
+          <button class="icon-btn" id="theme-toggle" type="button" aria-label="切换明亮模式" data-icon="moon"></button>
+        </div>
+      </div>
+    </aside>
+    <button class="workspace-edge-toggle workspace-toggle" id="workspace-toggle" type="button" aria-label="收起工作栏" aria-expanded="true" aria-controls="workspace-rail">
+      <span class="workspace-toggle-mark" aria-hidden="true">
+        <span class="workspace-toggle-expanded-icon" data-icon="sidebar-collapse"></span>
+        <span class="workspace-toggle-collapsed-icon" data-icon="menu"></span>
+      </span>
+      <span class="workspace-toggle-label">收起工作栏</span>
+    </button>
+    <div class="app-frame">
+      <main id="app" tabindex="-1"></main>
+    </div>
   </div>
   <div id="toast-root" class="toast-root" aria-live="polite"></div>
   <div id="modal-root"></div>
   <noscript>本平台需要启用 JavaScript 才能使用。</noscript>
-  <script type="module" src="js/main.js?v=options-2"></script>
+  <script type="module" src="js/main.js?v=account-ui-1"></script>
   <script
     id="live2d-widget-loader"
     defer

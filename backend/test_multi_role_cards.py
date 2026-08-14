@@ -360,13 +360,14 @@ class MultiRoleCardWorkApiTests(IsolatedDatabaseTestCase):
         super().tearDown()
 
     def create_card(self, name):
-        return repositories.create_card({"name": name})
+        return repositories.create_card({"name": name}, owner_user_id=self.test_user.id)
 
     def test_create_and_list_preserve_ordered_cards_and_player_attributes(self):
         first = self.create_card("第一张")
         second = self.create_card("第二张")
         created = works_routes.create_work(
-            WorkCreate(title="多卡剧本", card_ids=[second["id"], first["id"]], player_attributes={"体力": 80})
+            WorkCreate(title="多卡剧本", card_ids=[second["id"], first["id"]], player_attributes={"体力": 80}),
+            user=self.test_user,
         )
 
         self.assertEqual(created["card_ids"], [second["id"], first["id"]])
@@ -375,14 +376,14 @@ class MultiRoleCardWorkApiTests(IsolatedDatabaseTestCase):
         self.assertEqual(created["card"]["id"], second["id"])
         self.assertEqual(created["player_attributes"], {"体力": 80})
         self.assertEqual(
-            works_routes.list_works(page=1, page_size=20)["items"][0]["card_ids"],
+            works_routes.list_works(page=1, page_size=20, viewer=self.test_user)["items"][0]["card_ids"],
             [second["id"], first["id"]],
         )
 
     def test_cards_can_be_reused_by_different_works(self):
         card = self.create_card("可复用")
-        first_work = works_routes.create_work(WorkCreate(title="剧本一", card_ids=[card["id"]]))
-        second_work = works_routes.create_work(WorkCreate(title="剧本二", card_ids=[card["id"]]))
+        first_work = works_routes.create_work(WorkCreate(title="剧本一", card_ids=[card["id"]]), user=self.test_user)
+        second_work = works_routes.create_work(WorkCreate(title="剧本二", card_ids=[card["id"]]), user=self.test_user)
 
         self.assertEqual(first_work["card_ids"], [card["id"]])
         self.assertEqual(second_work["card_ids"], [card["id"]])
@@ -391,11 +392,11 @@ class MultiRoleCardWorkApiTests(IsolatedDatabaseTestCase):
         first = self.create_card("第一张")
         second = self.create_card("第二张")
         work = works_routes.create_work(
-            WorkCreate(title="待更新", card_ids=[first["id"], second["id"]], player_attributes={"体力": 80})
+            WorkCreate(title="待更新", card_ids=[first["id"], second["id"]], player_attributes={"体力": 80}), user=self.test_user
         )
 
-        retained = works_routes.update_work(work["id"], WorkUpdate(title="只改标题"))
-        cleared_cards = works_routes.update_work(work["id"], WorkUpdate(card_ids=[], player_attributes={}))
+        retained = works_routes.update_work(work["id"], WorkUpdate(title="只改标题"), user=self.test_user)
+        cleared_cards = works_routes.update_work(work["id"], WorkUpdate(card_ids=[], player_attributes={}), user=self.test_user)
 
         self.assertEqual(retained["card_ids"], [first["id"], second["id"]])
         self.assertEqual(retained["player_attributes"], {"体力": 80})
@@ -407,8 +408,8 @@ class MultiRoleCardWorkApiTests(IsolatedDatabaseTestCase):
 
     def test_legacy_card_id_remains_compatible_and_explicit_null_clears_list(self):
         card = self.create_card("旧接口")
-        work = works_routes.create_work(WorkCreate(title="旧剧本", card_id=card["id"]))
-        cleared = works_routes.update_work(work["id"], WorkUpdate(card_id=None))
+        work = works_routes.create_work(WorkCreate(title="旧剧本", card_id=card["id"]), user=self.test_user)
+        cleared = works_routes.update_work(work["id"], WorkUpdate(card_id=None), user=self.test_user)
 
         self.assertEqual(work["card_ids"], [card["id"]])
         self.assertEqual(work["card"]["id"], card["id"])
@@ -418,12 +419,12 @@ class MultiRoleCardWorkApiTests(IsolatedDatabaseTestCase):
     def test_missing_or_duplicate_card_ids_are_rejected_without_partial_update(self):
         first = self.create_card("第一张")
         second = self.create_card("第二张")
-        work = works_routes.create_work(WorkCreate(title="原始标题", card_ids=[first["id"]]))
+        work = works_routes.create_work(WorkCreate(title="原始标题", card_ids=[first["id"]]), user=self.test_user)
 
         with self.assertRaises(HTTPException) as missing:
-            works_routes.update_work(work["id"], WorkUpdate(title="不应写入", card_ids=[second["id"], 999999]))
+            works_routes.update_work(work["id"], WorkUpdate(title="不应写入", card_ids=[second["id"], 999999]), user=self.test_user)
         with self.assertRaises(HTTPException) as duplicate:
-            works_routes.create_work(WorkCreate(title="重复", card_ids=[first["id"], first["id"]]))
+            works_routes.create_work(WorkCreate(title="重复", card_ids=[first["id"], first["id"]]), user=self.test_user)
 
         self.assertEqual(missing.exception.status_code, 422)
         self.assertEqual(missing.exception.detail["code"], "validation_error")
@@ -437,7 +438,10 @@ class MultiRoleCardWorkApiTests(IsolatedDatabaseTestCase):
 
     def test_legacy_work_without_association_rows_reads_as_one_card_list(self):
         card = self.create_card("遗留卡")
-        work_id = database.execute("INSERT INTO works (title, card_id) VALUES (?, ?)", ("遗留剧本", card["id"]))
+        work_id = database.execute(
+            "INSERT INTO works (owner_user_id, title, card_id) VALUES (?, ?, ?)",
+            (self.test_user.id, "遗留剧本", card["id"]),
+        )
 
         work = repositories.get_work(work_id)
 
@@ -448,10 +452,10 @@ class MultiRoleCardWorkApiTests(IsolatedDatabaseTestCase):
     def test_deleting_any_position_reference_is_atomic(self):
         first = self.create_card("首卡")
         second = self.create_card("后卡")
-        work = works_routes.create_work(WorkCreate(title="受保护", card_ids=[first["id"], second["id"]]))
+        work = works_routes.create_work(WorkCreate(title="受保护", card_ids=[first["id"], second["id"]]), user=self.test_user)
 
         with self.assertRaises(repositories.CardReferenceConflict) as conflict:
-            repositories.delete_card(second["id"])
+            repositories.delete_card(second["id"], owner_user_id=self.test_user.id)
 
         self.assertEqual(conflict.exception.works, [{"id": work["id"], "title": "受保护"}])
         self.assertIsNotNone(repositories.get_card(second["id"]))
@@ -475,7 +479,7 @@ class MultiRoleCardConversationTests(IsolatedDatabaseTestCase):
             "directives": [f"{name} directive"],
             "initial_state": {"attributes": {"legacy": 1}},
             "character_attributes": {"mood": 50},
-        })
+        }, owner_user_id=self.test_user.id)
 
     def test_new_conversation_snapshots_all_cards_in_order_and_uses_work_attributes(self):
         first = self.create_card("first card", "first frozen persona")
@@ -484,9 +488,9 @@ class MultiRoleCardConversationTests(IsolatedDatabaseTestCase):
             "title": "multi-card work",
             "card_ids": [first["id"], second["id"]],
             "player_attributes": {"stamina": 80},
-        })
+        }, owner_user_id=self.test_user.id)
 
-        conversation = repositories.create_conversation(work["id"], "snapshot session")
+        conversation = repositories.create_conversation(work["id"], "snapshot session", user_id=self.test_user.id)
 
         self.assertEqual(
             [card["name"] for card in conversation["card_snapshots"]],
@@ -494,10 +498,10 @@ class MultiRoleCardConversationTests(IsolatedDatabaseTestCase):
         )
         self.assertEqual(conversation["card_snapshot"]["name"], "first card")
         self.assertEqual(conversation["card_id"], first["id"])
-        self.assertEqual(repositories.get_state(conversation["id"])["attributes"], {"stamina": 80})
+        self.assertEqual(repositories.get_state(conversation["id"], user_id=self.test_user.id)["attributes"], {"stamina": 80})
         self.assertEqual(conversation["current_state"]["attributes"], {"stamina": 80})
 
-        repositories.update_card(first["id"], {"persona": "edited live persona"})
+        repositories.update_card(first["id"], {"persona": "edited live persona"}, owner_user_id=self.test_user.id)
         self.assertEqual(
             repositories.get_conversation_cards(conversation)[0]["persona"],
             "first frozen persona",
@@ -510,63 +514,60 @@ class MultiRoleCardConversationTests(IsolatedDatabaseTestCase):
             "title": "multi-card work",
             "card_ids": [first["id"], second["id"]],
             "player_attributes": {"stamina": 80},
-        })
-        old_conversation = repositories.create_conversation(work["id"], "old session")
+        }, owner_user_id=self.test_user.id)
+        old_conversation = repositories.create_conversation(work["id"], "old session", user_id=self.test_user.id)
 
-        repositories.update_card(first["id"], {"persona": "first current persona"})
-        repositories.update_card(second["id"], {"persona": "second current persona"})
+        repositories.update_card(first["id"], {"persona": "first current persona"}, owner_user_id=self.test_user.id)
+        repositories.update_card(second["id"], {"persona": "second current persona"}, owner_user_id=self.test_user.id)
         repositories.update_work(work["id"], {
             "card_ids": [second["id"], first["id"]],
             "player_attributes": {"stamina": 99},
-        })
-        new_conversation = repositories.create_conversation(work["id"], "new session")
+        }, owner_user_id=self.test_user.id)
+        new_conversation = repositories.create_conversation(work["id"], "new session", user_id=self.test_user.id)
 
-        old_prompt = adventure_engine.build_messages(old_conversation["id"])[0]["content"]
-        new_prompt = adventure_engine.build_messages(new_conversation["id"])[0]["content"]
+        old_prompt = adventure_engine.build_messages(self.access_for(old_conversation))[0]["content"]
+        new_prompt = adventure_engine.build_messages(self.access_for(new_conversation))[0]["content"]
         self.assertLess(old_prompt.index("first frozen persona"), old_prompt.index("second frozen persona"))
         self.assertNotIn("first current persona", old_prompt)
         self.assertLess(new_prompt.index("second current persona"), new_prompt.index("first current persona"))
         self.assertIn("second current persona", new_prompt)
-        self.assertEqual(repositories.get_state(new_conversation["id"])["attributes"], {"stamina": 99})
+        self.assertEqual(repositories.get_state(new_conversation["id"], user_id=self.test_user.id)["attributes"], {"stamina": 99})
 
-        repositories.update_work(work["id"], {"card_ids": []})
-        repositories.delete_card(first["id"])
-        repositories.delete_card(second["id"])
-        self.assertIn("first frozen persona", adventure_engine.build_messages(old_conversation["id"])[0]["content"])
-        self.assertIn("second frozen persona", adventure_engine.build_messages(old_conversation["id"])[0]["content"])
+        repositories.update_work(work["id"], {"card_ids": []}, owner_user_id=self.test_user.id)
+        repositories.delete_card(first["id"], owner_user_id=self.test_user.id)
+        repositories.delete_card(second["id"], owner_user_id=self.test_user.id)
+        self.assertIn("first frozen persona", adventure_engine.build_messages(self.access_for(old_conversation))[0]["content"])
+        self.assertIn("second frozen persona", adventure_engine.build_messages(self.access_for(old_conversation))[0]["content"])
 
     def test_empty_work_creates_compatible_no_card_conversation(self):
-        work = repositories.create_work({"title": "no-card work", "player_attributes": {"luck": 7}})
+        work = repositories.create_work({"title": "no-card work", "player_attributes": {"luck": 7}}, owner_user_id=self.test_user.id)
 
-        conversation = repositories.create_conversation(work["id"], "no-card session")
+        conversation = repositories.create_conversation(work["id"], "no-card session", user_id=self.test_user.id)
 
         self.assertEqual(conversation["card_snapshots"], [])
         self.assertEqual(conversation["card_snapshot"], {})
         self.assertIsNone(conversation["card_id"])
-        self.assertEqual(repositories.get_state(conversation["id"])["attributes"], {"luck": 7})
+        self.assertEqual(repositories.get_state(conversation["id"], user_id=self.test_user.id)["attributes"], {"luck": 7})
         self.assertEqual(repositories.get_conversation_cards(conversation), [])
-        self.assertNotIn("角色卡：", adventure_engine.build_messages(conversation["id"])[0]["content"])
+        self.assertNotIn("角色卡：", adventure_engine.build_messages(self.access_for(conversation))[0]["content"])
 
         later_card = self.create_card("later card", "must not leak into this session")
-        repositories.update_work(work["id"], {"card_ids": [later_card["id"]]})
-        reloaded = repositories.get_conversation(conversation["id"])
+        repositories.update_work(work["id"], {"card_ids": [later_card["id"]]}, owner_user_id=self.test_user.id)
+        reloaded = repositories.get_conversation(conversation["id"], self.test_user.id)
 
         self.assertEqual(reloaded["card_snapshots"], [])
         self.assertEqual(reloaded["card_snapshot"], {})
         self.assertEqual(repositories.get_conversation_cards(reloaded), [])
         self.assertIsNone(repositories.get_conversation_card(reloaded))
-        self.assertNotIn(
-            "must not leak into this session",
-            adventure_engine.build_messages(conversation["id"])[0]["content"],
-        )
+        self.assertNotIn("must not leak into this session", adventure_engine.build_messages(self.access_for(conversation))[0]["content"])
 
     def test_no_card_snapshot_stays_empty_after_restart_and_cleans_marker_array(self):
-        work = repositories.create_work({"title": "restart-safe no-card work"})
-        conversation = repositories.create_conversation(work["id"], "restart-safe no-card session")
+        work = repositories.create_work({"title": "restart-safe no-card work"}, owner_user_id=self.test_user.id)
+        conversation = repositories.create_conversation(work["id"], "restart-safe no-card session", user_id=self.test_user.id)
 
         database.init_db()
 
-        reloaded = repositories.get_conversation(conversation["id"])
+        reloaded = repositories.get_conversation(conversation["id"], self.test_user.id)
         self.assertEqual(reloaded["card_snapshots"], [])
         self.assertEqual(repositories.get_conversation_cards(reloaded), [])
 
@@ -576,7 +577,7 @@ class MultiRoleCardConversationTests(IsolatedDatabaseTestCase):
         )
         database.init_db()
 
-        cleaned = repositories.get_conversation(conversation["id"])
+        cleaned = repositories.get_conversation(conversation["id"], self.test_user.id)
         self.assertEqual(cleaned["card_snapshots"], [])
         self.assertEqual(repositories.get_conversation_cards(cleaned), [])
 
@@ -585,14 +586,14 @@ class MultiRoleCardConversationTests(IsolatedDatabaseTestCase):
         work = repositories.create_work({
             "title": "legacy fallback work",
             "card_ids": [card["id"]],
-        })
-        conversation = repositories.create_conversation(work["id"], "legacy session")
+        }, owner_user_id=self.test_user.id)
+        conversation = repositories.create_conversation(work["id"], "legacy session", user_id=self.test_user.id)
         database.execute(
             "UPDATE conversations SET card_snapshot = ?, card_snapshots = ? WHERE id = ?",
             (database.json_dumps({}), database.json_dumps([]), conversation["id"]),
         )
 
-        reloaded = repositories.get_conversation(conversation["id"])
+        reloaded = repositories.get_conversation(conversation["id"], self.test_user.id)
 
         self.assertEqual(
             [item["name"] for item in repositories.get_conversation_cards(reloaded)],
@@ -606,17 +607,17 @@ class MultiRoleCardConversationTests(IsolatedDatabaseTestCase):
             "title": "branch work",
             "card_ids": [first["id"], second["id"]],
             "player_attributes": {"stamina": 80},
-        })
-        original = repositories.create_conversation(work["id"], "original")
-        repositories.save_state(original["id"], {"attributes": {"stamina": 66}})
+        }, owner_user_id=self.test_user.id)
+        original = repositories.create_conversation(work["id"], "original", user_id=self.test_user.id)
+        repositories.save_state(original["id"], {"attributes": {"stamina": 66}}, user_id=self.test_user.id)
 
-        branch = repositories.create_conversation_branch(original["id"], "branch", "alternate")
+        branch = repositories.create_conversation_branch(original["id"], "branch", "alternate", user_id=self.test_user.id)
 
         self.assertEqual(branch["parent_conversation_id"], original["id"])
         self.assertEqual(branch["card_snapshots"], original["card_snapshots"])
-        self.assertEqual(repositories.get_state(branch["id"])["attributes"], {"stamina": 66})
-        repositories.update_card(first["id"], {"persona": "changed after branch"})
-        self.assertIn("first frozen persona", adventure_engine.build_messages(branch["id"])[0]["content"])
+        self.assertEqual(repositories.get_state(branch["id"], user_id=self.test_user.id)["attributes"], {"stamina": 66})
+        repositories.update_card(first["id"], {"persona": "changed after branch"}, owner_user_id=self.test_user.id)
+        self.assertIn("first frozen persona", adventure_engine.build_messages(self.access_for(branch))[0]["content"])
 
 
 if __name__ == "__main__":

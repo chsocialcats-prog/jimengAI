@@ -12,7 +12,7 @@ from backend.test_helpers import IsolatedDatabaseTestCase
 class WorkBundleTests(IsolatedDatabaseTestCase):
     def setUp(self):
         super().setUp()
-        self.card = repositories.create_card({"name": "角色", "persona": "设定"})
+        self.card = repositories.create_card({"name": "角色", "persona": "设定"}, owner_user_id=self.test_user.id)
 
     def tearDown(self):
         super().tearDown()
@@ -31,6 +31,7 @@ class WorkBundleTests(IsolatedDatabaseTestCase):
                     "active_reply_template_id": "main",
                 },
                 now="2026-08-12T00:00:00",
+                owner_user_id=self.test_user.id,
             )
             _update_work_in_connection(
                 connection,
@@ -41,6 +42,7 @@ class WorkBundleTests(IsolatedDatabaseTestCase):
                     "card_ids": [],
                 },
                 now="2026-08-12T00:01:00",
+                owner_user_id=self.test_user.id,
             )
             connection.commit()
 
@@ -67,6 +69,7 @@ class WorkBundleTests(IsolatedDatabaseTestCase):
                     {"title": "规则", "keywords": ["规则"], "content": "内容", "priority": 2, "enabled": True}
                 ],
             },
+            owner_user_id=self.test_user.id,
         )
 
         self.assertEqual(result["work"]["worldbook_id"], result["worldbook"]["id"])
@@ -85,6 +88,7 @@ class WorkBundleTests(IsolatedDatabaseTestCase):
                     {"title": "删除", "keywords": [], "content": "旧", "priority": 0, "enabled": True},
                 ],
             },
+            owner_user_id=self.test_user.id,
         )
         work_id = created["work"]["id"]
         worldbook_id = created["worldbook"]["id"]
@@ -101,6 +105,7 @@ class WorkBundleTests(IsolatedDatabaseTestCase):
                 ],
             },
             work_id=work_id,
+            owner_user_id=self.test_user.id,
         )
         self.assertEqual(updated["work"]["title"], "新作品")
         self.assertEqual({entry["title"] for entry in updated["worldbook"]["entries"]}, {"已更新", "新增"})
@@ -110,6 +115,7 @@ class WorkBundleTests(IsolatedDatabaseTestCase):
                 {"title": "不应保存", "card_ids": [999999]},
                 {"title": "不应保存", "description": "失败", "entries": []},
                 work_id=work_id,
+                owner_user_id=self.test_user.id,
             )
         self.assertEqual(repositories.get_work(work_id)["title"], "新作品")
         worldbook = repositories.get_worldbook(worldbook_id)

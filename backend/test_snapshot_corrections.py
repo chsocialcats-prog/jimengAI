@@ -8,49 +8,49 @@ from backend.test_helpers import IsolatedDatabaseTestCase
 class SnapshotCorrectionTests(IsolatedDatabaseTestCase):
     def setUp(self):
         super().setUp()
-        work = repositories.create_work({"title": "测试剧本", "opening": "开场"})
-        self.conversation = repositories.create_conversation(work["id"], "测试会话")
+        work = repositories.create_work({"title": "测试剧本", "opening": "开场"}, owner_user_id=self.test_user.id)
+        self.conversation = repositories.create_conversation(work["id"], "测试会话", user_id=self.test_user.id)
 
     def tearDown(self):
         super().tearDown()
 
     def test_snapshot_restores_corrections_and_hides_them_from_public_results(self):
         conversation_id = self.conversation["id"]
-        repositories.add_conversation_correction(conversation_id, "persona", "原人设")
-        repositories.add_conversation_correction(conversation_id, "memory", "原记忆")
-        snapshot = repositories.create_snapshot(conversation_id, name="修正快照")
+        repositories.add_conversation_correction(conversation_id, self.test_user.id, "persona", "原人设")
+        repositories.add_conversation_correction(conversation_id, self.test_user.id, "memory", "原记忆")
+        snapshot = repositories.create_snapshot(conversation_id, name="修正快照", user_id=self.test_user.id)
 
-        repositories.add_conversation_correction(conversation_id, "persona", "新人设")
-        repositories.add_conversation_correction(conversation_id, "memory", "新记忆")
-        repositories.restore_snapshot(conversation_id, snapshot["id"])
+        repositories.add_conversation_correction(conversation_id, self.test_user.id, "persona", "新人设")
+        repositories.add_conversation_correction(conversation_id, self.test_user.id, "memory", "新记忆")
+        repositories.restore_snapshot(conversation_id, snapshot["id"], user_id=self.test_user.id)
 
-        restored = repositories.get_conversation(conversation_id)
+        restored = repositories.get_conversation(conversation_id, self.test_user.id)
         self.assertEqual([item["content"] for item in restored["persona_corrections"]], ["原人设"])
         self.assertEqual([item["content"] for item in restored["memory_corrections"]], ["原记忆"])
 
-        private_snapshot = repositories.get_snapshot(snapshot["id"], include_private=True)
+        private_snapshot = repositories.get_snapshot(snapshot["id"], self.test_user.id, include_private=True)
         self.assertEqual(private_snapshot["persona_corrections"][0]["content"], "原人设")
         self.assertEqual(private_snapshot["memory_corrections"][0]["content"], "原记忆")
-        self.assertNotIn("persona_corrections", repositories.get_snapshot(snapshot["id"]))
-        self.assertNotIn("memory_corrections", repositories.get_snapshot(snapshot["id"]))
+        self.assertNotIn("persona_corrections", repositories.get_snapshot(snapshot["id"], self.test_user.id))
+        self.assertNotIn("memory_corrections", repositories.get_snapshot(snapshot["id"], self.test_user.id))
 
     def test_new_empty_snapshot_clears_corrections_but_legacy_snapshot_preserves_them(self):
         conversation_id = self.conversation["id"]
-        empty_snapshot = repositories.create_snapshot(conversation_id, name="空修正")
-        repositories.add_conversation_correction(conversation_id, "persona", "稍后添加")
-        repositories.restore_snapshot(conversation_id, empty_snapshot["id"])
-        self.assertEqual(repositories.get_conversation(conversation_id)["persona_corrections"], [])
+        empty_snapshot = repositories.create_snapshot(conversation_id, name="空修正", user_id=self.test_user.id)
+        repositories.add_conversation_correction(conversation_id, self.test_user.id, "persona", "稍后添加")
+        repositories.restore_snapshot(conversation_id, empty_snapshot["id"], user_id=self.test_user.id)
+        self.assertEqual(repositories.get_conversation(conversation_id, self.test_user.id)["persona_corrections"], [])
 
-        repositories.add_conversation_correction(conversation_id, "persona", "当前修正")
+        repositories.add_conversation_correction(conversation_id, self.test_user.id, "persona", "当前修正")
         with closing(database.connect()) as connection:
             connection.execute(
                 "UPDATE snapshots SET persona_corrections = NULL, memory_corrections = NULL WHERE id = ?",
                 (empty_snapshot["id"],),
             )
             connection.commit()
-        repositories.restore_snapshot(conversation_id, empty_snapshot["id"])
+        repositories.restore_snapshot(conversation_id, empty_snapshot["id"], user_id=self.test_user.id)
         self.assertEqual(
-            [item["content"] for item in repositories.get_conversation(conversation_id)["persona_corrections"]],
+            [item["content"] for item in repositories.get_conversation(conversation_id, self.test_user.id)["persona_corrections"]],
             ["当前修正"],
         )
 
@@ -83,7 +83,7 @@ class SnapshotCorrectionTests(IsolatedDatabaseTestCase):
 
         database.init_db()
 
-        snapshot = repositories.get_snapshot(1, include_private=True)
+        snapshot = repositories.get_snapshot(1, self.test_user.id, include_private=True)
         self.assertEqual(snapshot["name"], "旧存档")
         self.assertEqual(snapshot["state"]["money"], 7)
         self.assertIsNone(snapshot["persona_corrections"])

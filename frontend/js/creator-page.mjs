@@ -10,8 +10,10 @@ import {
   listWorks,
   saveWorkBundle,
   updateWorkBundle,
+  isAccountMode,
 } from "./data.mjs";
 import { cardPersonalitySummary, workCardIds } from "./domain/role-cards.mjs";
+import { projectOwnership } from "./domain/ownership.mjs";
 
 let appEl = null;
 let navigate = null;
@@ -386,6 +388,20 @@ function bindCreatorEvents() {
 export async function renderCreator(workId = null) {
   if (!appEl || !navigate || !toast) throw new Error("创作台依赖尚未配置。");
   const isEditing = Number.isFinite(Number(workId)) && Number(workId) > 0;
+  if (isEditing && (MODE !== "offline" || isAccountMode())) {
+    try {
+      const currentWork = await getWork(workId);
+      if (!projectOwnership(currentWork).canEdit) {
+        toast("只有作品创建者可以编辑此作品", "info");
+        navigate(`#/work/${workId}`);
+        return;
+      }
+    } catch (error) {
+      toast(error.message || "无法读取作品权限", "error");
+      navigate("#/");
+      return;
+    }
+  }
   creatorEditState = null;
   creatorEditWorkId = isEditing ? Number(workId) : null;
   appEl.innerHTML = `

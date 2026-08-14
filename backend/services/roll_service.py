@@ -4,7 +4,7 @@
 import random
 import re
 
-from .. import repositories
+from ..repository import conversation_repository
 from ..database import now_str
 from . import state_service
 
@@ -88,7 +88,7 @@ def format_roll_result(roll, target=None, attribute=None, reason=""):
 
 
 def perform_roll(
-    conversation_id,
+    access,
     dice="1d20",
     target=None,
     attribute=None,
@@ -111,7 +111,7 @@ def perform_roll(
         "critical_type": roll["critical_type"],
     }
     state_service.apply_state_delta(
-        conversation_id,
+        access,
         {
             "logs": [
                 {
@@ -137,7 +137,7 @@ def perform_roll(
 
 
 def record_roll(
-    conversation_id,
+    access,
     dice="1d20",
     target=None,
     attribute=None,
@@ -145,14 +145,14 @@ def record_roll(
 ):
     """执行骰子判定并把结果写回消息、状态日志和存档。"""
     result = perform_roll(
-        conversation_id,
+        access,
         dice=dice,
         target=target,
         attribute=attribute,
         reason=reason,
     )
-    return repositories.create_message(
-        conversation_id,
+    return conversation_repository.create_message(
+        access.conversation["id"], access.auth.user.id,
         "assistant",
         result["content"],
         metadata=result["metadata"],
@@ -160,12 +160,12 @@ def record_roll(
     )
 
 
-def record_judge(conversation_id, judge_block):
+def record_judge(access, judge_block):
     """解析 AI 结构化判定块并执行一次骰子判定。"""
     if not isinstance(judge_block, dict):
         return None
     return record_roll(
-        conversation_id,
+        access,
         dice=str(judge_block.get("dice") or "1d20"),
         target=judge_block.get("target"),
         attribute=judge_block.get("attribute"),
@@ -173,12 +173,12 @@ def record_judge(conversation_id, judge_block):
     )
 
 
-def perform_judge(conversation_id, judge_block):
+def perform_judge(access, judge_block):
     """解析 AI 结构化判定块，返回结果文本但不创建独立消息。"""
     if not isinstance(judge_block, dict):
         return None
     return perform_roll(
-        conversation_id,
+        access,
         dice=str(judge_block.get("dice") or "1d20"),
         target=judge_block.get("target"),
         attribute=judge_block.get("attribute"),

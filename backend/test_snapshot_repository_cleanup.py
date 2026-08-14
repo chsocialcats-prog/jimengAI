@@ -10,8 +10,8 @@ from backend.test_helpers import IsolatedDatabaseTestCase
 class SnapshotRepositoryCleanupTests(IsolatedDatabaseTestCase):
     def setUp(self):
         super().setUp()
-        work = repositories.create_work({"title": "test work", "opening": "opening"})
-        self.conversation = repositories.create_conversation(work["id"], "test conversation")
+        work = repositories.create_work({"title": "test work", "opening": "opening"}, owner_user_id=self.test_user.id)
+        self.conversation = repositories.create_conversation(work["id"], "test conversation", user_id=self.test_user.id)
 
     def tearDown(self):
         super().tearDown()
@@ -27,12 +27,14 @@ class SnapshotRepositoryCleanupTests(IsolatedDatabaseTestCase):
                 name="manual",
                 note="manual note",
                 branch_label="manual branch",
+                user_id=self.test_user.id,
             )
             autosave = repositories.create_snapshot(
                 self.conversation["id"],
                 autosave=True,
                 note="autosave note",
                 branch_label="autosave branch",
+                user_id=self.test_user.id,
             )
 
         self.assertEqual(insert_snapshot.call_count, 2)
@@ -44,24 +46,25 @@ class SnapshotRepositoryCleanupTests(IsolatedDatabaseTestCase):
 
     def test_insert_paths_preserve_complete_private_snapshot_values(self):
         conversation_id = self.conversation["id"]
-        repositories.save_state(conversation_id, {"money": 42, "items": ["key"]})
-        repositories.create_message(conversation_id, "user", "snapshot message")
-        repositories.save_memory_summary(conversation_id, "long-term memory", 7)
-        repositories.add_conversation_correction(conversation_id, "persona", "persona correction")
-        repositories.add_conversation_correction(conversation_id, "memory", "memory correction")
+        repositories.save_state(conversation_id, {"money": 42, "items": ["key"]}, user_id=self.test_user.id)
+        repositories.create_message(conversation_id, "user", "snapshot message", user_id=self.test_user.id)
+        repositories.save_memory_summary(conversation_id, "long-term memory", 7, user_id=self.test_user.id)
+        repositories.add_conversation_correction(conversation_id, self.test_user.id, "persona", "persona correction")
+        repositories.add_conversation_correction(conversation_id, self.test_user.id, "memory", "memory correction")
 
         manual = repositories.create_snapshot(
-            conversation_id, name="complete manual", note="manual note", branch_label="branch"
+            conversation_id, name="complete manual", note="manual note", branch_label="branch", user_id=self.test_user.id
         )
         autosave = repositories.create_snapshot(
             conversation_id,
             autosave=True,
             note="autosave note",
             branch_label="autosave branch",
+            user_id=self.test_user.id,
         )
 
         for snapshot in (manual, autosave):
-            private = repositories.get_snapshot(snapshot["id"], include_private=True)
+            private = repositories.get_snapshot(snapshot["id"], self.test_user.id, include_private=True)
             self.assertEqual(private["state"]["money"], 42)
             self.assertEqual(private["state"]["items"], ["key"])
             self.assertEqual(private["messages"][-1]["content"], "snapshot message")
@@ -72,11 +75,11 @@ class SnapshotRepositoryCleanupTests(IsolatedDatabaseTestCase):
 
     def test_insert_paths_preserve_empty_corrections(self):
         conversation_id = self.conversation["id"]
-        manual = repositories.create_snapshot(conversation_id, name="empty manual")
-        autosave = repositories.create_snapshot(conversation_id, autosave=True)
+        manual = repositories.create_snapshot(conversation_id, name="empty manual", user_id=self.test_user.id)
+        autosave = repositories.create_snapshot(conversation_id, autosave=True, user_id=self.test_user.id)
 
         for snapshot in (manual, autosave):
-            private = repositories.get_snapshot(snapshot["id"], include_private=True)
+            private = repositories.get_snapshot(snapshot["id"], self.test_user.id, include_private=True)
             self.assertEqual(private["persona_corrections"], [])
             self.assertEqual(private["memory_corrections"], [])
 
@@ -139,6 +142,7 @@ class SnapshotRepositoryCleanupTests(IsolatedDatabaseTestCase):
             with self.assertRaisesRegex(RuntimeError, "forced snapshot insert failure"):
                 snapshot_repository.create_snapshot(
                     self.conversation["id"],
+                    self.test_user.id,
                     name="failed",
                     connect_fn=lambda: failing_connection,
                 )

@@ -6,6 +6,7 @@ import json
 import unittest
 from backend import database, repositories
 from backend.main import app
+from backend.auth.dependencies import require_auth
 from backend.test_helpers import IsolatedDatabaseTestCase
 
 
@@ -14,10 +15,14 @@ class ConversationRenameTests(IsolatedDatabaseTestCase):
 
     def setUp(self):
         super().setUp()
-        work = repositories.create_work({"title": "Rename test work"})
-        self.conversation = repositories.create_conversation(work["id"], "Before rename")
+        app.dependency_overrides[require_auth] = lambda: self.test_auth
+        app.user_middleware.clear()
+        app.middleware_stack = None
+        work = repositories.create_work({"title": "Rename test work"}, owner_user_id=self.test_user.id)
+        self.conversation = repositories.create_conversation(work["id"], "Before rename", user_id=self.test_user.id)
 
     def tearDown(self):
+        app.dependency_overrides.clear()
         super().tearDown()
 
     def test_rename_returns_the_updated_conversation(self):
@@ -60,14 +65,14 @@ class ConversationRenameTests(IsolatedDatabaseTestCase):
             "name": "Frozen hero",
             "persona": "original persona",
             "character_attributes": {"mood": 50},
-        })
+        }, owner_user_id=self.test_user.id)
         work = repositories.create_work({
             "title": "Snapshot state work",
             "card_ids": [card["id"]],
-        })
-        conversation = repositories.create_conversation(work["id"], "Frozen state")
-        repositories.save_state(conversation["id"], {"characters": {}})
-        repositories.update_card(card["id"], {"character_attributes": {"mood": 99}})
+        }, owner_user_id=self.test_user.id)
+        conversation = repositories.create_conversation(work["id"], "Frozen state", user_id=self.test_user.id)
+        repositories.save_state(conversation["id"], {"characters": {}}, user_id=self.test_user.id)
+        repositories.update_card(card["id"], {"character_attributes": {"mood": 99}}, owner_user_id=self.test_user.id)
 
         status_code, body = self.request(
             "GET", f"/api/conversations/{conversation['id']}/state", None

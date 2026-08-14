@@ -9,6 +9,7 @@ from backend.routers import cards_routes, works_routes
 from backend.schemas import WorkUpdate
 from backend.services import adventure_engine
 from backend.test_helpers import IsolatedDatabaseTestCase
+from backend.test_helpers import conversation_access
 
 
 class RoleCardLibraryTests(IsolatedDatabaseTestCase):
@@ -19,11 +20,11 @@ class RoleCardLibraryTests(IsolatedDatabaseTestCase):
         super().tearDown()
 
     def create_card(self):
-        return repositories.create_card({"name": "测试角色"})
+        return repositories.create_card({"name": "测试角色"}, owner_user_id=self.test_user.id)
 
     def test_lists_referencing_works_by_latest_update(self):
         card = self.create_card()
-        work = repositories.create_work({"title": "引用剧本", "card_id": card["id"]})
+        work = repositories.create_work({"title": "引用剧本", "card_id": card["id"]}, owner_user_id=self.test_user.id)
 
         self.assertEqual(
             repositories.list_card_references(card["id"]),
@@ -32,10 +33,10 @@ class RoleCardLibraryTests(IsolatedDatabaseTestCase):
 
     def test_delete_card_rejects_referenced_card_and_preserves_it(self):
         card = self.create_card()
-        work = repositories.create_work({"title": "引用剧本", "card_id": card["id"]})
+        work = repositories.create_work({"title": "引用剧本", "card_id": card["id"]}, owner_user_id=self.test_user.id)
 
         with self.assertRaises(repositories.CardReferenceConflict) as context:
-            repositories.delete_card(card["id"])
+            repositories.delete_card(card["id"], owner_user_id=self.test_user.id)
 
         self.assertEqual(context.exception.works, [{"id": work["id"], "title": "引用剧本"}])
         self.assertIsNotNone(repositories.get_card(card["id"]))
@@ -43,7 +44,7 @@ class RoleCardLibraryTests(IsolatedDatabaseTestCase):
     def test_delete_card_removes_unreferenced_card(self):
         card = self.create_card()
 
-        repositories.delete_card(card["id"])
+        repositories.delete_card(card["id"], owner_user_id=self.test_user.id)
 
         self.assertIsNone(repositories.get_card(card["id"]))
 
@@ -68,7 +69,7 @@ class RoleCardLibraryTests(IsolatedDatabaseTestCase):
 
         try:
             with patch.object(repositories, "connect", return_value=RecordingConnection()):
-                repositories.delete_card(card["id"])
+                repositories.delete_card(card["id"], owner_user_id=self.test_user.id)
         finally:
             connection.close()
 
@@ -78,19 +79,22 @@ class RoleCardLibraryTests(IsolatedDatabaseTestCase):
             for index, query in enumerate(statements)
             if "FROM works WHERE card_id = ?" in query
         ]
-        delete_index = statements.index("DELETE FROM cards WHERE id = ?")
+        delete_index = next(
+            index for index, query in enumerate(statements)
+            if "DELETE FROM cards WHERE id = ?" in query
+        )
         self.assertEqual(len(reference_queries), 1)
         self.assertLess(reference_queries[0], delete_index)
 
     def test_router_returns_conflict_for_referenced_card(self):
         card = self.create_card()
-        work = repositories.create_work({"title": "引用剧本", "card_id": card["id"]})
+        work = repositories.create_work({"title": "引用剧本", "card_id": card["id"]}, owner_user_id=self.test_user.id)
 
         with self.assertRaises(HTTPException) as context:
-            cards_routes.delete_card(card["id"])
+            cards_routes.delete_card(card["id"], user=self.test_user)
 
         self.assertEqual(context.exception.status_code, 409)
-        self.assertEqual(context.exception.detail["code"], "conflict")
+        self.assertEqual(context.exception.detail["code"], "resource_in_use")
         self.assertIn(
             {"id": work["id"], "title": "引用剧本"},
             context.exception.detail["works"],
@@ -98,9 +102,9 @@ class RoleCardLibraryTests(IsolatedDatabaseTestCase):
 
     def test_work_route_clears_an_explicit_card_reference(self):
         card = self.create_card()
-        work = repositories.create_work({"title": "引用剧本", "card_id": card["id"]})
+        work = repositories.create_work({"title": "引用剧本", "card_id": card["id"]}, owner_user_id=self.test_user.id)
 
-        updated = works_routes.update_work(work["id"], WorkUpdate(card_id=None))
+        updated = works_routes.update_work(work["id"], WorkUpdate(card_id=None), user=self.test_user)
 
         self.assertIsNone(updated["card_id"])
 
@@ -114,17 +118,17 @@ class CardSnapshotTests(IsolatedDatabaseTestCase):
 
     def create_work_with_card(self, persona, **card_data):
         card = repositories.create_card(
-            {"name": "快照角色", "persona": persona, **card_data}
+            {"name": "快照角色", "persona": persona, **card_data}, owner_user_id=self.test_user.id
         )
         work = repositories.create_work(
-            {"title": "快照剧本", "card_id": card["id"]}
+            {"title": "快照剧本", "card_id": card["id"]}, owner_user_id=self.test_user.id
         )
         return card, work
 
     def test_new_conversation_copies_card_persona_into_snapshot(self):
         _, work = self.create_work_with_card("创建时人设")
 
-        conversation = repositories.create_conversation(work["id"], "首次会话")
+        conversation = repositories.create_conversation(work["id"], "首次会话", user_id=self.test_user.id)
 
         self.assertEqual(
             (conversation.get("card_snapshot") or {}).get("persona"),
@@ -133,12 +137,12 @@ class CardSnapshotTests(IsolatedDatabaseTestCase):
 
     def test_build_messages_uses_old_snapshot_after_card_changes(self):
         card, work = self.create_work_with_card("旧人设")
-        old_conversation = repositories.create_conversation(work["id"], "旧会话")
-        repositories.update_card(card["id"], {"persona": "新人设"})
-        new_conversation = repositories.create_conversation(work["id"], "新会话")
+        old_conversation = repositories.create_conversation(work["id"], "旧会话", user_id=self.test_user.id)
+        repositories.update_card(card["id"], {"persona": "新人设"}, owner_user_id=self.test_user.id)
+        new_conversation = repositories.create_conversation(work["id"], "新会话", user_id=self.test_user.id)
 
-        old_system_prompt = adventure_engine.build_messages(old_conversation["id"])[0]["content"]
-        new_system_prompt = adventure_engine.build_messages(new_conversation["id"])[0]["content"]
+        old_system_prompt = adventure_engine.build_messages(self.access_for(old_conversation))[0]["content"]
+        new_system_prompt = adventure_engine.build_messages(self.access_for(new_conversation))[0]["content"]
 
         self.assertIn("旧人设", old_system_prompt)
         self.assertNotIn("新人设", old_system_prompt)
@@ -147,12 +151,12 @@ class CardSnapshotTests(IsolatedDatabaseTestCase):
 
     def test_snapshot_remains_authoritative_after_work_is_cleared_and_card_deleted(self):
         card, work = self.create_work_with_card("已固定人设")
-        conversation = repositories.create_conversation(work["id"], "保留快照的会话")
+        conversation = repositories.create_conversation(work["id"], "保留快照的会话", user_id=self.test_user.id)
 
-        works_routes.update_work(work["id"], WorkUpdate(card_id=None))
-        repositories.delete_card(card["id"])
+        works_routes.update_work(work["id"], WorkUpdate(card_id=None), user=self.test_user)
+        repositories.delete_card(card["id"], owner_user_id=self.test_user.id)
         resolved_card = repositories.get_conversation_card(
-            repositories.get_conversation(conversation["id"])
+            repositories.get_conversation(conversation["id"], self.test_user.id)
         )
 
         self.assertEqual(resolved_card["persona"], "已固定人设")
@@ -165,8 +169,8 @@ class CardSnapshotTests(IsolatedDatabaseTestCase):
             initial_state={"attributes": {"心情": 5}},
             character_attributes={"好感度": 10},
         )
-        empty_conversation = repositories.create_conversation(work["id"], "待迁移会话")
-        pinned_conversation = repositories.create_conversation(work["id"], "固定会话")
+        empty_conversation = repositories.create_conversation(work["id"], "待迁移会话", user_id=self.test_user.id)
+        pinned_conversation = repositories.create_conversation(work["id"], "固定会话", user_id=self.test_user.id)
         with closing(database.connect()) as connection:
             columns = [row[1] for row in connection.execute("PRAGMA table_info(conversations)")]
             if "card_snapshot" not in columns:
@@ -185,12 +189,13 @@ class CardSnapshotTests(IsolatedDatabaseTestCase):
 
         database.init_db()
 
+        restored_card = repositories.get_conversation(empty_conversation["id"], self.test_user.id)["card_snapshot"]
+        for key, value in card.items():
+            if key in {"owner_username", "can_edit", "referencing_works"}:
+                continue
+            self.assertEqual(restored_card[key], value)
         self.assertEqual(
-            repositories.get_conversation(empty_conversation["id"])["card_snapshot"],
-            card,
-        )
-        self.assertEqual(
-            repositories.get_conversation(pinned_conversation["id"])["card_snapshot"],
+            repositories.get_conversation(pinned_conversation["id"], self.test_user.id)["card_snapshot"],
             {"persona": "固定人设"},
         )
 

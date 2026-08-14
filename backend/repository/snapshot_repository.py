@@ -44,25 +44,30 @@ def row_to_snapshot(row, include_private=False):
     return data
 
 
-def list_snapshots(conversation_id):
+def list_snapshots(conversation_id, user_id):
     """读取会话的全部存档，新存档在前。"""
     rows = database.fetch_all(
-        "SELECT * FROM snapshots WHERE conversation_id = ? "
-        "ORDER BY created_at DESC, id DESC",
-        (conversation_id,),
+        "SELECT snapshots.* FROM snapshots JOIN conversations "
+        "ON conversations.id = snapshots.conversation_id "
+        "WHERE snapshots.conversation_id = ? AND conversations.user_id = ? "
+        "ORDER BY snapshots.created_at DESC, snapshots.id DESC",
+        (conversation_id, user_id),
     )
     return [row_to_snapshot(row) for row in rows]
 
 
-def get_snapshot(snapshot_id, conversation_id=None, include_private=False):
+def get_snapshot(snapshot_id, user_id, conversation_id=None, include_private=False):
     """按主键读取存档；指定会话时校验归属。"""
-    if conversation_id is None:
-        row = database.fetch_one("SELECT * FROM snapshots WHERE id = ?", (snapshot_id,))
-    else:
-        row = database.fetch_one(
-            "SELECT * FROM snapshots WHERE id = ? AND conversation_id = ?",
-            (snapshot_id, conversation_id),
-        )
+    where = "snapshots.id = ? AND conversations.user_id = ?"
+    params = [snapshot_id, user_id]
+    if conversation_id is not None:
+        where += " AND snapshots.conversation_id = ?"
+        params.append(conversation_id)
+    row = database.fetch_one(
+        "SELECT snapshots.* FROM snapshots JOIN conversations "
+        "ON conversations.id = snapshots.conversation_id WHERE " + where,
+        params,
+    )
     return row_to_snapshot(row, include_private=include_private)
 
 
@@ -80,7 +85,7 @@ def _insert_snapshot(connection, values):
 
 
 def create_snapshot(
-    conversation_id,
+    conversation_id, user_id,
     name="手动存档",
     note="",
     branch_label="",
@@ -94,6 +99,12 @@ def create_snapshot(
         # 快照中的状态、消息和记忆必须来自同一时刻，不能在读取过程中被流式
         # 写入或读档穿插修改。
         connection.execute("BEGIN IMMEDIATE")
+        if connection.execute(
+            "SELECT 1 FROM conversations WHERE id = ? AND user_id = ?",
+            (conversation_id, user_id),
+        ).fetchone() is None:
+            connection.rollback()
+            return None
         state_record = _get_state_in_connection(connection, conversation_id)
         snapshot_state = normalize_state(state_record or {})
         messages = _get_messages_in_connection(connection, conversation_id)
@@ -176,11 +187,11 @@ def create_snapshot(
                 ),
             )
         connection.commit()
-    return get_snapshot(snapshot_id)
+    return get_snapshot(snapshot_id, user_id)
 
 
 def restore_snapshot(
-    conversation_id, snapshot_id, *, connect_fn=database.connect
+    conversation_id, snapshot_id, user_id, *, connect_fn=database.connect
 ):
     """读档：恢复状态、消息、记忆摘要与会话修正。"""
     now = database.now_str()
@@ -188,8 +199,11 @@ def restore_snapshot(
         # 删除旧消息、写入状态和摘要必须同生共死；异常时 SQLite 会回滚整个读档。
         connection.execute("BEGIN IMMEDIATE")
         row = connection.execute(
-            "SELECT * FROM snapshots WHERE id = ? AND conversation_id = ?",
-            (snapshot_id, conversation_id),
+            "SELECT snapshots.* FROM snapshots JOIN conversations "
+            "ON conversations.id = snapshots.conversation_id "
+            "WHERE snapshots.id = ? AND snapshots.conversation_id = ? "
+            "AND conversations.user_id = ?",
+            (snapshot_id, conversation_id, user_id),
         ).fetchone()
         if row is None:
             connection.rollback()
@@ -231,15 +245,14 @@ def restore_snapshot(
             ),
         )
         connection.commit()
-    return get_state(conversation_id, connect_fn=connect_fn)
+    return get_state(conversation_id, user_id, connect_fn=connect_fn)
 
 
-def delete_snapshot(snapshot_id, conversation_id=None):
+def delete_snapshot(snapshot_id, user_id, conversation_id=None):
     """删除存档；指定会话时校验归属。"""
-    if conversation_id is None:
-        database.execute("DELETE FROM snapshots WHERE id = ?", (snapshot_id,))
-    else:
-        database.execute(
-            "DELETE FROM snapshots WHERE id = ? AND conversation_id = ?",
-            (snapshot_id, conversation_id),
-        )
+    where = "id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ?)"
+    params = [snapshot_id, user_id]
+    if conversation_id is not None:
+        where += " AND conversation_id = ?"
+        params.append(conversation_id)
+    database.execute("DELETE FROM snapshots WHERE " + where, params)

@@ -5,6 +5,7 @@ import copy
 import unittest
 from unittest.mock import patch
 
+from backend.auth.types import AuthContext, ConversationAccess, PublicUser
 from backend.services import context_service
 
 
@@ -19,6 +20,10 @@ class FakeSummaryClient:
 
 
 class ContextServiceTests(unittest.TestCase):
+    def setUp(self):
+        user = PublicUser(id=1, username="context-user", created_at="2026-01-01T00:00:00+00:00")
+        self.access = ConversationAccess(AuthContext(user, 1), {"id": 7, "owner_user_id": 1})
+
     def config(self, **generation):
         values = {
             "max_tokens": 8,
@@ -53,12 +58,12 @@ class ContextServiceTests(unittest.TestCase):
             context_service.repositories,
             "save_memory_summary",
         ) as save_summary:
-            inspection = context_service.inspect_context(7, config)
+            inspection = context_service.inspect_context(self.access, config)
 
         self.assertEqual(inspection.prompt_tokens, 51)
         self.assertEqual(inspection.trigger_limit, 60)
         self.assertFalse(inspection.needs_compression)
-        build_messages.assert_called_once_with(7, recent_count=2)
+        build_messages.assert_called_once_with(self.access, recent_count=2)
         save_summary.assert_not_called()
 
     def test_inspect_context_triggers_at_inclusive_threshold(self):
@@ -72,7 +77,7 @@ class ContextServiceTests(unittest.TestCase):
             "estimate_messages_tokens",
             return_value=52,
         ):
-            inspection = context_service.inspect_context(7, config)
+            inspection = context_service.inspect_context(self.access, config)
 
         self.assertEqual(inspection.prompt_tokens + config["generation"]["max_tokens"], 60)
         self.assertTrue(inspection.needs_compression)
@@ -94,7 +99,7 @@ class ContextServiceTests(unittest.TestCase):
             context_service.repositories,
             "save_memory_summary",
         ) as save_summary:
-            result = context_service.prepare_context(7, config, inspection=inspection)
+            result = context_service.prepare_context(self.access, config, inspection=inspection)
 
         self.assertEqual(result.messages, messages)
         self.assertEqual(result.prompt_tokens_before, 10)
@@ -138,7 +143,7 @@ class ContextServiceTests(unittest.TestCase):
             "estimate_messages_tokens",
             return_value=20,
         ):
-            result = context_service.prepare_context(7, config, inspection=inspection)
+            result = context_service.prepare_context(self.access, config, inspection=inspection)
 
         self.assertTrue(result.compressed)
         self.assertEqual(result.method, "ai")
@@ -146,7 +151,7 @@ class ContextServiceTests(unittest.TestCase):
         self.assertEqual(fake_client.calls[0][1], 12)
         self.assertIn("prior", fake_client.calls[0][0][0]["content"])
         self.assertIn("old-0", fake_client.calls[0][0][0]["content"])
-        save_summary.assert_called_once_with(7, "AI summary", 2)
+        save_summary.assert_called_once_with(7, "AI summary", 2, user_id=1)
 
     def test_summary_prompt_escapes_untrusted_delimiters_and_sets_data_only_instruction(self):
         history = [
@@ -191,7 +196,7 @@ class ContextServiceTests(unittest.TestCase):
             "estimate_messages_tokens",
             return_value=20,
         ):
-            context_service.prepare_context(7, config, inspection=inspection)
+            context_service.prepare_context(self.access, config, inspection=inspection)
 
         prompt = fake_client.calls[0][0][0]["content"]
         self.assertIn("untrusted", prompt.lower())
@@ -245,7 +250,7 @@ class ContextServiceTests(unittest.TestCase):
             "estimate_messages_tokens",
             return_value=20,
         ):
-            context_service.prepare_context(7, config, inspection=inspection)
+            context_service.prepare_context(self.access, config, inspection=inspection)
 
         self.assertEqual(save_summary.call_args.args[2], 1)
 
@@ -286,7 +291,7 @@ class ContextServiceTests(unittest.TestCase):
             "estimate_messages_tokens",
             return_value=20,
         ):
-            context_service.prepare_context(7, config, inspection=inspection)
+            context_service.prepare_context(self.access, config, inspection=inspection)
 
         self.assertEqual(save_summary.call_args.args[2], -1)
 
@@ -323,7 +328,7 @@ class ContextServiceTests(unittest.TestCase):
             "estimate_messages_tokens",
             return_value=20,
         ):
-            context_service.prepare_context(7, config, inspection=inspection)
+            context_service.prepare_context(self.access, config, inspection=inspection)
 
         transcript = fake_client.calls[0][0][0]["content"]
         self.assertIn("old-2", transcript)
@@ -371,7 +376,7 @@ class ContextServiceTests(unittest.TestCase):
             "estimate_messages_tokens",
             return_value=20,
         ):
-            result = context_service.prepare_context(7, config, inspection=inspection)
+            result = context_service.prepare_context(self.access, config, inspection=inspection)
 
         transcript = fake_client.calls[0][0][0]["content"]
         self.assertIn("old-2", transcript)
@@ -416,7 +421,7 @@ class ContextServiceTests(unittest.TestCase):
             "estimate_messages_tokens",
             return_value=20,
         ):
-            result = context_service.prepare_context(7, config, inspection=inspection)
+            result = context_service.prepare_context(self.access, config, inspection=inspection)
 
         self.assertEqual(result.method, "local")
         self.assertTrue(save_summary.call_args.args[1])
@@ -457,7 +462,7 @@ class ContextServiceTests(unittest.TestCase):
             "estimate_messages_tokens",
             return_value=20,
         ):
-            result = context_service.prepare_context(7, config, inspection=inspection)
+            result = context_service.prepare_context(self.access, config, inspection=inspection)
 
         self.assertEqual(result.method, "local")
         self.assertTrue(save_summary.call_args.args[1])
@@ -498,7 +503,7 @@ class ContextServiceTests(unittest.TestCase):
             "estimate_messages_tokens",
             return_value=20,
         ):
-            result = context_service.prepare_context(7, config, inspection=inspection)
+            result = context_service.prepare_context(self.access, config, inspection=inspection)
 
         self.assertEqual(result.method, "local")
         self.assertTrue(save_summary.call_args.args[1])
@@ -539,12 +544,12 @@ class ContextServiceTests(unittest.TestCase):
             "estimate_messages_tokens",
             return_value=20,
         ):
-            result = context_service.prepare_context(7, config, inspection=inspection)
+            result = context_service.prepare_context(self.access, config, inspection=inspection)
 
         self.assertTrue(result.compressed)
         self.assertEqual(result.method, "local")
         self.assertTrue(save_summary.call_args.args[1])
-        create_client.assert_called_once_with(config)
+        create_client.assert_called_once_with(config, None)
 
     def test_missing_api_key_uses_local_fallback_without_creating_client(self):
         config = dict(self.config(), deepseek={"api_key": ""})
@@ -577,7 +582,7 @@ class ContextServiceTests(unittest.TestCase):
             "estimate_messages_tokens",
             return_value=20,
         ):
-            result = context_service.prepare_context(7, config, inspection=inspection)
+            result = context_service.prepare_context(self.access, config, inspection=inspection)
 
         self.assertEqual(result.method, "local")
         create_client.assert_not_called()
@@ -636,7 +641,7 @@ class ContextServiceTests(unittest.TestCase):
             "estimate_messages_tokens",
             side_effect=estimate,
         ):
-            result = context_service.prepare_context(7, config, inspection=inspection)
+            result = context_service.prepare_context(self.access, config, inspection=inspection)
 
         self.assertEqual(result.messages[0]["content"].count("x"), 8)
         self.assertLess(
@@ -696,7 +701,7 @@ class ContextServiceTests(unittest.TestCase):
             "estimate_messages_tokens",
             side_effect=estimate,
         ):
-            result = context_service.prepare_context(7, config, inspection=inspection)
+            result = context_service.prepare_context(self.access, config, inspection=inspection)
 
         self.assertNotIn("summary", result.messages[0]["content"])
         self.assertEqual(result.prompt_tokens_after, 2)

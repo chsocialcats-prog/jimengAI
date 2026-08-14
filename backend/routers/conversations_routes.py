@@ -1,14 +1,17 @@
 # -*- coding: utf-8 -*-
-"""冒险会话、状态、存档与显式判定接口。"""
+"""Private adventure routes, authenticated and scoped by conversation owner."""
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
-from .. import repositories
+from ..api_models.adventure import ConversationBranchCreate
+from ..auth.dependencies import require_auth, require_conversation_owner
+from ..auth.types import AuthContext
+from ..repository import conversation_repository, snapshot_repository
 from ..schemas import (
+    ConversationCorrection,
     ConversationCreate,
     ConversationUpdate,
     OnboardingComplete,
-    ConversationCorrection,
     RollRequest,
     SnapshotCreate,
     StateUpdate,
@@ -23,95 +26,138 @@ from ._error_helpers import (
 router = APIRouter(prefix="/api/conversations", tags=["冒险会话"])
 
 
-def _get_conversation_or_404(conversation_id):
-    conversation = repositories.get_conversation(conversation_id)
-    if conversation is None:
+def _access_or_404(conversation_id, auth):
+    access = require_conversation_owner(conversation_id, auth, conversation_repository)
+    if access is None:
         _raise_not_found("冒险会话不存在")
-    return conversation
+    return access
 
 
-@router.get("", summary="会话列表")
+@router.get("")
 def list_conversations(
     work_id: int | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    auth: AuthContext = Depends(require_auth),
 ):
-    return repositories.list_conversations(
-        work_id=work_id, page=page, page_size=page_size
+    return conversation_repository.list_conversations(
+        auth.user.id, work_id=work_id, page=page, page_size=page_size
     )
 
 
-@router.post("", status_code=201, summary="创建会话")
-def create_conversation(payload: ConversationCreate):
-    conversation = repositories.create_conversation(
-        payload.work_id, payload.title
+@router.post("", status_code=201)
+def create_conversation(payload: ConversationCreate, auth: AuthContext = Depends(require_auth)):
+    conversation = conversation_repository.create_conversation(
+        payload.work_id, payload.title, auth.user.id
     )
     if conversation is None:
         _raise_not_found("作品不存在")
     return conversation
 
 
-@router.get("/{conversation_id}", summary="会话详情")
-def get_conversation(conversation_id: int):
-    return _get_conversation_or_404(conversation_id)
+@router.get("/{conversation_id}")
+def get_conversation(conversation_id: int, auth: AuthContext = Depends(require_auth)):
+    return _access_or_404(conversation_id, auth).conversation
 
 
-@router.put("/{conversation_id}", summary="更新会话")
-def update_conversation(conversation_id: int, payload: ConversationUpdate):
-    _get_conversation_or_404(conversation_id)
-    return repositories.update_conversation(conversation_id, payload.model_dump())
+@router.put("/{conversation_id}")
+def update_conversation(
+    conversation_id: int,
+    payload: ConversationUpdate,
+    auth: AuthContext = Depends(require_auth),
+):
+    access = _access_or_404(conversation_id, auth)
+    return conversation_repository.update_conversation(
+        conversation_id, access.auth.user.id, payload.model_dump()
+    )
 
 
-@router.post("/{conversation_id}/onboarding", summary="完成开局引导")
-def complete_onboarding(conversation_id: int, payload: OnboardingComplete):
-    _get_conversation_or_404(conversation_id)
+@router.post("/{conversation_id}/onboarding")
+def complete_onboarding(
+    conversation_id: int,
+    payload: OnboardingComplete,
+    auth: AuthContext = Depends(require_auth),
+):
+    access = _access_or_404(conversation_id, auth)
     try:
-        return repositories.complete_conversation_onboarding(conversation_id, payload.answers)
+        return conversation_repository.complete_conversation_onboarding(
+            conversation_id, access.auth.user.id, payload.answers
+        )
     except ValueError as exc:
         _raise_validation_from_value_error(exc)
 
-@router.post("/{conversation_id}/corrections", summary="保存会话修正")
-def add_correction(conversation_id: int, payload: ConversationCorrection):
-    _get_conversation_or_404(conversation_id)
+
+@router.post("/{conversation_id}/corrections")
+def add_correction(
+    conversation_id: int,
+    payload: ConversationCorrection,
+    auth: AuthContext = Depends(require_auth),
+):
+    access = _access_or_404(conversation_id, auth)
     try:
-        return repositories.add_conversation_correction(conversation_id, payload.kind, payload.content)
+        return conversation_repository.add_conversation_correction(
+            conversation_id, access.auth.user.id, payload.kind, payload.content
+        )
     except ValueError as exc:
         _raise_validation_from_value_error(exc)
 
 
-@router.delete("/{conversation_id}", status_code=204, summary="删除会话")
-def delete_conversation(conversation_id: int):
-    _get_conversation_or_404(conversation_id)
-    repositories.delete_conversation(conversation_id)
+@router.delete("/{conversation_id}", status_code=204)
+def delete_conversation(conversation_id: int, auth: AuthContext = Depends(require_auth)):
+    access = _access_or_404(conversation_id, auth)
+    conversation_repository.delete_conversation(conversation_id, access.auth.user.id)
 
 
-@router.get("/{conversation_id}/messages", summary="读取对话历史")
-def get_messages(conversation_id: int):
-    _get_conversation_or_404(conversation_id)
-    return repositories.get_messages(conversation_id)
+@router.post("/{conversation_id}/archive")
+def archive_conversation(conversation_id: int, auth: AuthContext = Depends(require_auth)):
+    access = _access_or_404(conversation_id, auth)
+    return conversation_repository.set_conversation_status(
+        conversation_id, access.auth.user.id, "archived"
+    )
 
 
-@router.get("/{conversation_id}/state", summary="查询实时状态")
-def get_state(conversation_id: int):
-    _get_conversation_or_404(conversation_id)
-    return state_service.get_state(conversation_id)
+@router.post("/{conversation_id}/restore")
+def restore_conversation(conversation_id: int, auth: AuthContext = Depends(require_auth)):
+    access = _access_or_404(conversation_id, auth)
+    return conversation_repository.set_conversation_status(
+        conversation_id, access.auth.user.id, "active"
+    )
 
 
-@router.put("/{conversation_id}/state", summary="更新实时状态")
-def update_state(conversation_id: int, payload: StateUpdate):
-    _get_conversation_or_404(conversation_id)
+@router.get("/{conversation_id}/messages")
+def get_messages(conversation_id: int, auth: AuthContext = Depends(require_auth)):
+    access = _access_or_404(conversation_id, auth)
+    return conversation_repository.get_messages(conversation_id, access.auth.user.id)
+
+
+@router.get("/{conversation_id}/state")
+def get_state(conversation_id: int, auth: AuthContext = Depends(require_auth)):
+    return state_service.get_state(_access_or_404(conversation_id, auth))
+
+
+@router.put("/{conversation_id}/state")
+def update_state(
+    conversation_id: int,
+    payload: StateUpdate,
+    auth: AuthContext = Depends(require_auth),
+):
+    access = _access_or_404(conversation_id, auth)
     data = payload.model_dump(exclude_unset=True)
     if not data:
         _raise_no_update_fields()
-    return state_service.update_state(conversation_id, data)
+    return state_service.update_state(access, data)
 
 
-@router.post("/{conversation_id}/roll", summary="显式骰子判定")
-def roll(conversation_id: int, payload: RollRequest):
-    _get_conversation_or_404(conversation_id)
+@router.post("/{conversation_id}/roll")
+def roll(
+    conversation_id: int,
+    payload: RollRequest,
+    auth: AuthContext = Depends(require_auth),
+):
+    access = _access_or_404(conversation_id, auth)
     try:
         message = roll_service.record_roll(
-            conversation_id,
+            access,
             dice=payload.dice,
             target=payload.target,
             attribute=payload.attribute,
@@ -119,46 +165,37 @@ def roll(conversation_id: int, payload: RollRequest):
         )
     except ValueError as exc:
         _raise_validation_from_value_error(exc)
-    return {
-        "message": message,
-        "state": state_service.get_state(conversation_id),
-    }
+    return {"message": message, "state": state_service.get_state(access)}
 
 
-@router.get("/{conversation_id}/snapshots", summary="存档列表")
-def list_snapshots(conversation_id: int):
-    _get_conversation_or_404(conversation_id)
-    items = snapshot_service.list_snapshots(conversation_id)
-    return {
-        "items": items,
-        "total": len(items),
-        "page": 1,
-        "page_size": len(items) or 1,
-    }
+@router.get("/{conversation_id}/snapshots")
+def list_snapshots(conversation_id: int, auth: AuthContext = Depends(require_auth)):
+    items = snapshot_service.list_snapshots(_access_or_404(conversation_id, auth))
+    return {"items": items, "total": len(items), "page": 1, "page_size": len(items) or 1}
 
 
-@router.post(
-    "/{conversation_id}/snapshots",
-    status_code=201,
-    summary="创建手动存档",
-)
-def create_snapshot(conversation_id: int, payload: SnapshotCreate):
-    _get_conversation_or_404(conversation_id)
+@router.post("/{conversation_id}/snapshots", status_code=201)
+def create_snapshot(
+    conversation_id: int,
+    payload: SnapshotCreate,
+    auth: AuthContext = Depends(require_auth),
+):
     return snapshot_service.create_manual_snapshot(
-        conversation_id,
+        _access_or_404(conversation_id, auth),
         name=payload.name,
         note=payload.note,
         branch_label=payload.branch_label,
     )
 
 
-@router.post(
-    "/{conversation_id}/snapshots/{snapshot_id}/restore",
-    summary="读档",
-)
-def restore_snapshot(conversation_id: int, snapshot_id: int):
-    _get_conversation_or_404(conversation_id)
-    state = snapshot_service.restore_snapshot(conversation_id, snapshot_id)
+@router.post("/{conversation_id}/snapshots/{snapshot_id}/restore")
+def restore_snapshot(
+    conversation_id: int,
+    snapshot_id: int,
+    auth: AuthContext = Depends(require_auth),
+):
+    access = _access_or_404(conversation_id, auth)
+    state = snapshot_service.restore_snapshot(access, snapshot_id)
     if state is None:
         _raise_not_found("存档不存在")
     return {
@@ -166,18 +203,37 @@ def restore_snapshot(conversation_id: int, snapshot_id: int):
         "conversation_id": conversation_id,
         "snapshot_id": snapshot_id,
         "state": state,
-        "conversation": repositories.get_conversation(conversation_id),
-        "messages": repositories.get_messages(conversation_id),
+        "conversation": conversation_repository.get_conversation(conversation_id, access.auth.user.id),
+        "messages": conversation_repository.get_messages(conversation_id, access.auth.user.id),
     }
 
 
-@router.delete(
-    "/{conversation_id}/snapshots/{snapshot_id}",
-    status_code=204,
-    summary="删除存档",
-)
-def delete_snapshot(conversation_id: int, snapshot_id: int):
-    _get_conversation_or_404(conversation_id)
-    if repositories.get_snapshot(snapshot_id, conversation_id) is None:
+@router.delete("/{conversation_id}/snapshots/{snapshot_id}", status_code=204)
+def delete_snapshot(
+    conversation_id: int,
+    snapshot_id: int,
+    auth: AuthContext = Depends(require_auth),
+):
+    access = _access_or_404(conversation_id, auth)
+    if snapshot_repository.get_snapshot(snapshot_id, access.auth.user.id, conversation_id) is None:
         _raise_not_found("存档不存在")
-    snapshot_service.delete_snapshot(conversation_id, snapshot_id)
+    snapshot_service.delete_snapshot(access, snapshot_id)
+
+
+@router.post("/{conversation_id}/branches", status_code=201)
+def create_branch(
+    conversation_id: int,
+    payload: ConversationBranchCreate,
+    auth: AuthContext = Depends(require_auth),
+):
+    access = _access_or_404(conversation_id, auth)
+    branch = conversation_repository.create_conversation_branch(
+        conversation_id,
+        access.auth.user.id,
+        payload.title,
+        payload.branch_label,
+        payload.snapshot_id,
+    )
+    if branch is None:
+        _raise_not_found("存档不存在")
+    return branch

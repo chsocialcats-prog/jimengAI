@@ -12,6 +12,8 @@ from fastapi import HTTPException
 from backend.main import http_exception_handler
 from backend.routers import chat_routes
 from backend.schemas import ChatRequest
+from backend.auth.types import AuthContext, ConversationAccess, PublicUser
+from backend.services.user_ai_settings import EffectiveAIConfig
 
 
 class ChatExclusivityTests(unittest.TestCase):
@@ -25,7 +27,13 @@ class ChatExclusivityTests(unittest.TestCase):
             yield "event: delta\ndata: {\"content\": \"first\"}\n\n"
             yield "event: done\ndata: {}\n\n"
 
-        with patch.object(chat_routes, "_get_conversation_or_404", return_value={"id": 7}), patch.object(
+        access = ConversationAccess(AuthContext(PublicUser(1, "chat-user", "2026-01-01T00:00:00+00:00"), 1), {"id": 7, "owner_user_id": 1})
+        config = EffectiveAIConfig("https://api.deepseek.com", "test-model", "", {}, 60, False)
+        with patch.object(chat_routes, "_get_conversation_or_404", side_effect=lambda conversation_id, _auth: ConversationAccess(
+            access.auth, {"id": conversation_id, "owner_user_id": 1}
+        )), patch.object(
+            chat_routes, "_resolve_generation_config", return_value=(config, None)
+        ), patch.object(
             chat_routes, "_stream_chat", side_effect=short_stream
         ):
             first_response = chat_routes.chat(7, ChatRequest(content="first"), request)
@@ -54,7 +62,11 @@ class ChatExclusivityTests(unittest.TestCase):
             raise RuntimeError("stream failed")
             yield  # pragma: no cover - keeps this a generator function
 
-        with patch.object(chat_routes, "_get_conversation_or_404", return_value={"id": 7}), patch.object(
+        access = ConversationAccess(AuthContext(PublicUser(1, "chat-user", "2026-01-01T00:00:00+00:00"), 1), {"id": 7, "owner_user_id": 1})
+        config = EffectiveAIConfig("https://api.deepseek.com", "test-model", "", {}, 60, False)
+        with patch.object(chat_routes, "_get_conversation_or_404", return_value=access), patch.object(
+            chat_routes, "_resolve_generation_config", return_value=(config, None)
+        ), patch.object(
             chat_routes, "_stream_chat", side_effect=error_stream
         ):
             failed_response = chat_routes.chat(7, ChatRequest(content="fail"), request)
@@ -71,7 +83,9 @@ class ChatExclusivityTests(unittest.TestCase):
             yield "event: delta\ndata: {\"content\": \"first\"}\n\n"
             yield "event: delta\ndata: {\"content\": \"second\"}\n\n"
 
-        with patch.object(chat_routes, "_get_conversation_or_404", return_value={"id": 7}), patch.object(
+        with patch.object(chat_routes, "_get_conversation_or_404", return_value=access), patch.object(
+            chat_routes, "_resolve_generation_config", return_value=(config, None)
+        ), patch.object(
             chat_routes, "_stream_chat", side_effect=endless_stream
         ):
             cancelled_response = chat_routes.chat(7, ChatRequest(content="cancel"), request)

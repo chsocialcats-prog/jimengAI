@@ -1,6 +1,13 @@
 // AI 对话冒险平台前端主程序
 import { icon, mountIcons } from "./icons.js";
 import { esc, formatTime } from "./core/format.mjs";
+import { createApiClient } from "./core/api-client.mjs";
+import { createAuthState } from "./auth-state.mjs";
+import { createAccountControls } from "./account-controls.mjs";
+import { createReadOnlyDemoAdapter } from "./read-only-demo.mjs";
+import { renderAuthPage } from "./auth-page.mjs";
+import { renderSettingsPage } from "./settings-page.mjs";
+import { renderWorldbookDetail, renderWorldbookEditor, renderWorldbooksPage } from "./worldbook-page.mjs";
 import {
   cardPersonalitySummary,
   normalizeRoleCards,
@@ -8,6 +15,7 @@ import {
   roleCardSummaryHtml,
   workCardIds,
 } from "./domain/role-cards.mjs";
+import { projectOwnership } from "./domain/ownership.mjs";
 import { readDynamicRows } from "./form-rows.mjs";
 import {
   addAttributeRow,
@@ -33,6 +41,7 @@ import {
   deleteConversation,
   deleteWork,
   detectMode as detectDataMode,
+  filterWorks,
   getApiKeyDraft,
   getCard,
   getWork,
@@ -52,21 +61,41 @@ import {
   toItems,
   updateCard,
   updateConversation,
+  configureDataAccess,
+  clearLegacyApiKeyDraft,
+  applyAccountConfigMode,
+  isAccountMode,
 } from "./data.mjs";
 
 const appEl = document.getElementById("app");
 const modeBadge = document.getElementById("mode-badge");
 const themeToggle = document.getElementById("theme-toggle");
+const workspaceRail = document.getElementById("workspace-rail");
+const workspaceToggle = document.getElementById("workspace-toggle");
+const railAiInquiry = document.getElementById("rail-ai-inquiry");
+const appShell = document.querySelector(".app-shell");
 const toastRoot = document.getElementById("toast-root");
 const modalRoot = document.getElementById("modal-root");
+const authNav = document.getElementById("auth-nav");
+const readOnlyDemoAdapter = createReadOnlyDemoAdapter();
+let backendAvailable = true;
+const apiClient = createApiClient({ onAuthRequired: () => { authState.rememberReturnHash(location.hash); navigate("#/login"); } });
+const authState = createAuthState({ apiClient, onLogout: () => { bypassAdventureLeavePrompt = true; if (location.hash.startsWith("#/adventure/") || location.hash.startsWith("#/onboarding/")) navigate("#/"); } });
+const accountControls = createAccountControls({
+  root: authNav,
+  auth: authState,
+  onLogoutError: (error) => toast(error?.message || "退出失败", "error"),
+});
 
 const AGE_KEY = "adventure_age_confirmed";
 const THEME_KEY = "adventure_theme";
+const WORKSPACE_COLLAPSED_KEY = "adventure_workspace_collapsed";
 let bypassAdventureLeavePrompt = false;
 let libraryFilter = { q: "", tag: "", sort: "recommend" };
 let cardEditorState = { cardId: null, initialState: {} };
 let cardLibraryQuery = "";
 let cardLibraryRenderToken = 0;
+let modeRefreshPromise = null;
 
 const $ = (selector, root = document) => root.querySelector(selector);
 
@@ -109,13 +138,75 @@ configureCreatorPage({ appEl, navigate, toast, openModal });
 configureAdventurePage({ appEl, modalRoot, navigate, toast, openModal });
 
 function updateModeBadge() {
-  const text = MODE === "online" ? "DeepSeek 在线" : MODE === "mock" ? "Mock 模式" : "离线演示";
+  const legacyModeText = MODE === "online" ? "DeepSeek 在线" : MODE === "mock" ? "Mock 模式" : "离线演示";
+  const text = !backendAvailable ? "离线只读演示" : legacyModeText;
+  const online = MODE === "online" && backendAvailable;
   modeBadge.textContent = text;
-  modeBadge.classList.toggle("online", MODE === "online");
-  modeBadge.classList.toggle("mock", MODE !== "online");
+  modeBadge.classList.toggle("online", online);
+  modeBadge.classList.toggle("mock", !online);
+}
+
+async function refreshAccountMode() {
+  if (!backendAvailable || authState.getSnapshot().status !== "authenticated") return;
+  if (modeRefreshPromise) return modeRefreshPromise;
+  modeRefreshPromise = loadSettings()
+    .then((settings) => applyAccountConfigMode(settings))
+    .catch(() => null)
+    .finally(() => { modeRefreshPromise = null; });
+  await modeRefreshPromise;
+  updateModeBadge();
+}
+
+function updateWorkspaceToggle(collapsed) {
+  if (!workspaceToggle) return;
+  workspaceToggle.setAttribute("aria-expanded", String(!collapsed));
+  const label = collapsed ? "展开工作栏" : "收起工作栏";
+  workspaceToggle.setAttribute("aria-label", label);
+  workspaceToggle.title = label;
+  const labelEl = workspaceToggle.querySelector(".workspace-toggle-label");
+  if (labelEl) labelEl.textContent = label;
+  workspaceToggle.classList.toggle("is-collapsed", collapsed);
+}
+
+function openRailAiInquiry() {
+  openModal(`
+    <section class="ai-inquiry-modal" aria-labelledby="ai-inquiry-title">
+      <p class="story-kicker">ASK NEKO</p>
+      <h2 id="ai-inquiry-title">AI 询问系统</h2>
+      <p>从当前作品的角色卡、世界书与章节记忆中寻找线索，适合询问角色动机、剧情细节或下一步方向。</p>
+      <div class="ai-inquiry-scope">
+        <span>CHARACTERS</span>
+        <span>WORLD BOOK</span>
+        <span>CHAPTER MEMORY</span>
+      </div>
+      <div class="settings-actions">
+        <button class="btn btn-ghost" type="button" data-close>稍后询问</button>
+        <button class="btn btn-primary" type="button" data-close>进入询问</button>
+      </div>
+    </section>`);
+}
+
+function setWorkspaceCollapsed(collapsed, persist = true) {
+  appShell?.classList.toggle("workspace-collapsed", collapsed);
+  workspaceRail?.setAttribute("aria-expanded", String(!collapsed));
+  updateWorkspaceToggle(collapsed);
+  if (persist) localStorage.setItem(WORKSPACE_COLLAPSED_KEY, collapsed ? "1" : "0");
+}
+
+function initWorkspace() {
+  const collapsed = localStorage.getItem(WORKSPACE_COLLAPSED_KEY) === "1";
+  setWorkspaceCollapsed(collapsed, false);
+  workspaceToggle?.addEventListener("click", () => {
+    setWorkspaceCollapsed(!appShell?.classList.contains("workspace-collapsed"));
+  });
+  railAiInquiry?.addEventListener("click", openRailAiInquiry);
 }
 
 async function seedDemo() {
+  if (!backendAvailable) {
+    toast("离线只读演示不可创建或导入内容", "info");
+    return;
+  }
   try {
     await seedDemoData();
     toast(MODE === "offline" ? "已载入示例作品" : "已创建示例作品", "success");
@@ -131,10 +222,13 @@ function parseRoute() {
   if (name === "adventure" && id) return { name: "adventure", id: Number(id) };
   if (name === "onboarding" && id) return { name: "onboarding", id: Number(id) };
   if (name === "cards") return { name: "cards" };
+  if (name === "worldbooks") return { name: "worldbooks" };
+  if (name === "worldbook" && id) return { name: "worldbook", id, edit: hash.endsWith("/edit") };
+  if (name === "login" || name === "register") return { name };
   if (name === "card" && id === "new") return { name: "card", id: null };
   if (name === "card" && id) return { name: "card", id: Number(id) };
   if (name === "creator") return { name: "creator", id: id ? Number(id) : null };
-  if (name === "settings") return { name: "settings" };
+  if (name === "settings") return { name: "settings", section: id === "profile" ? "profile" : "api" };
   return { name: "library" };
 }
 
@@ -206,10 +300,12 @@ function handleBeforeUnload(event) {
 
 async function route() {
   const current = parseRoute();
+  accountControls.handleRouteChange();
   document.querySelectorAll(".nav-links a").forEach((link) => {
     const nav = link.dataset.nav || "";
     const active = (nav === "library" && current.name === "library")
       || (nav === "cards" && (current.name === "cards" || current.name === "card"))
+      || (nav === "worldbooks" && (current.name === "worldbooks" || current.name === "worldbook"))
       || nav === current.name;
     link.classList.toggle("active", active);
   });
@@ -219,9 +315,36 @@ async function route() {
     else if (current.name === "adventure") await renderAdventure(current.id);
     else if (current.name === "onboarding") await renderOnboarding(current.id);
     else if (current.name === "cards") await renderCards();
+    else if (current.name === "worldbooks") await renderWorldbooksPage(appEl, { apiClient, adapter: backendAvailable ? null : readOnlyDemoAdapter, navigate, auth: authState, unavailable: !backendAvailable });
+    else if (current.name === "worldbook") {
+      if (current.edit || current.id === "new") {
+        await renderWorldbookEditor(appEl, { apiClient, adapter: backendAvailable ? null : readOnlyDemoAdapter, auth: authState, worldbookId: current.id, navigate, unavailable: !backendAvailable });
+      } else {
+        await renderWorldbookDetail(appEl, { apiClient, adapter: backendAvailable ? null : readOnlyDemoAdapter, worldbookId: current.id, navigate, unavailable: !backendAvailable });
+      }
+    }
     else if (current.name === "card") await renderCardEditor(current.id);
     else if (current.name === "creator") await renderCreator(current.id);
-    else if (current.name === "settings") await renderSettings();
+    else if (current.name === "settings") {
+      const authSnapshot = authState.getSnapshot();
+      if (authSnapshot.status === "anonymous") {
+        authState.rememberReturnHash(location.hash || "#/settings/api");
+        navigate("#/login");
+        return;
+      }
+      await renderSettingsPage(appEl, {
+        apiClient,
+        auth: authState,
+        user: authSnapshot.user,
+        section: current.section,
+        onSaved: refreshAccountMode,
+        unavailable: !backendAvailable || authSnapshot.status === "unavailable",
+      });
+    }
+    else if (current.name === "login" || current.name === "register") {
+      if (authState.getSnapshot().status === "authenticated") navigate(authState.consumeReturnHash() || "#/");
+      else renderAuthPage(appEl, { mode: current.name, snapshot: authState.getSnapshot(), auth: authState, navigate });
+    }
     else await renderLibrary();
   } catch (error) {
     appEl.innerHTML = `
@@ -252,6 +375,7 @@ function workCardHtml(work) {
   const tone = `cover-${(Number(work.id) % 6) + 1}`;
   const tags = (work.tags || []).map((tag) => `<span class="tag">${esc(tag)}</span>`).join("");
   const cards = orderedWorkCards(work);
+  const ownership = projectOwnership(work);
   return `
     <article class="work-card" data-work-id="${Number(work.id)}">
       ${coverHtml(work, tone)}
@@ -261,6 +385,7 @@ function workCardHtml(work) {
         ${roleCardSummaryHtml(cards)}
         ${tags ? `<div class="tag-list">${tags}</div>` : ""}
         <div class="work-card-meta">
+          <span>${esc(ownership.ownerLabel)}${ownership.canEdit ? " · 我的" : " · 只读"}</span>
           <span>${icon("clock")} ${formatTime(work.created_at)}</span>
           <span>${icon("users")} ${Number(work.plays || 0)} 次游玩</span>
         </div>
@@ -270,6 +395,29 @@ function workCardHtml(work) {
         </div>
       </div>
     </article>`;
+}
+
+function featuredWorkHtml(work) {
+  const tone = `cover-${(Number(work.id) % 6) + 1}`;
+  const tags = (work.tags || []).slice(0, 4).map((tag) => `<span class="tag">${esc(tag)}</span>`).join("");
+  const cards = orderedWorkCards(work);
+  const ownership = projectOwnership(work);
+  return `
+    <section class="library-featured" id="library-featured" data-work-id="${Number(work.id)}" aria-labelledby="library-featured-title">
+      <div class="library-featured-cover">${coverHtml(work, tone)}</div>
+      <div class="library-featured-content">
+        <p class="story-kicker">TONIGHT'S FEATURED STORY</p>
+        <h2 id="library-featured-title">${esc(work.title)}</h2>
+        <p class="library-featured-description">${esc(work.description || "一段新的故事正在等待你的第一步。")}</p>
+        <p class="library-featured-cast">${roleCardSummaryHtml(cards)}</p>
+        ${tags ? `<div class="tag-list">${tags}</div>` : ""}
+        <div class="library-featured-meta"><span>${esc(ownership.ownerLabel)}${ownership.canEdit ? " · 我的" : " · 只读"}</span><span>${icon("clock")} ${formatTime(work.created_at)}</span><span>${icon("users")} ${Number(work.plays || 0)} 次游玩</span></div>
+        <div class="detail-actions">
+          <button class="btn btn-primary" type="button" data-featured-action="start">${icon("play")} 开始冒险</button>
+          <button class="btn btn-ghost" type="button" data-featured-action="view">${icon("eye")} 查看章节</button>
+        </div>
+      </div>
+    </section>`;
 }
 
 function coverHtml(work, tone) {
@@ -286,12 +434,14 @@ async function renderLibrary() {
   }
   const tags = [...new Set(all.flatMap((work) => work.tags || []))].sort((a, b) => a.localeCompare(b, "zh"));
   const filtered = sortWorks(filterWorks(all, libraryFilter.q, libraryFilter.tag), libraryFilter.sort);
+  const featured = filtered[0] || null;
   appEl.innerHTML = `
     <div class="page">
       <div class="page-head">
         <div>
-          <h1 class="page-title">作品库</h1>
-          <p class="page-subtitle">选择一张角色卡，进入属于你的文字冒险。</p>
+          <p class="story-kicker">YOUR STORY LIBRARY</p>
+          <h1 class="page-title">发现一幕新故事</h1>
+          <p class="page-subtitle">选择一个世界，留下你的第一步。</p>
         </div>
         <div class="detail-actions">
           <button class="btn btn-primary" id="creator-btn">${icon("pen")} 创作作品</button>
@@ -315,8 +465,10 @@ async function renderLibrary() {
           <button data-sort="popular" class="${libraryFilter.sort === "popular" ? "active" : ""}">热门</button>
         </div>
         <div class="spacer"></div>
-        <button class="btn btn-ghost" id="demo-btn">${icon("download")} 载入示例</button>
+          <button class="btn btn-ghost" id="demo-btn">${icon("download")} 载入示例</button>
       </div>
+      ${featured ? featuredWorkHtml(featured) : ""}
+      <div class="library-section-heading"><div><p class="story-kicker">ALL STORIES</p><h2>全部作品</h2></div><span>${filtered.length} 个故事</span></div>
       <div id="work-grid" class="work-grid">${loadingHtml()}</div>
     </div>`;
 
@@ -364,10 +516,21 @@ function bindLibraryEvents() {
       });
     });
   }
-  $("#creator-btn")?.addEventListener("click", () => navigate("#/creator"));
+  $("#creator-btn")?.addEventListener("click", () => {
+    if (!backendAvailable) return toast("离线只读演示不可创建内容", "info");
+    navigate("#/creator");
+  });
   $("#demo-btn")?.addEventListener("click", async () => {
     await seedDemo();
     renderLibrary();
+  });
+  const featured = $("#library-featured");
+  featured?.addEventListener("click", async (event) => {
+    const action = event.target.closest("[data-featured-action]");
+    if (!action) return;
+    const workId = Number(featured.dataset.workId);
+    if (action.dataset.featuredAction === "start") await startWork(workId);
+    else navigate(`#/work/${workId}`);
   });
   const grid = $("#work-grid");
   grid?.addEventListener("click", async (event) => {
@@ -390,6 +553,15 @@ function bindLibraryEvents() {
 }
 
 async function startWork(workId) {
+  if (!backendAvailable) {
+    toast("离线只读演示不可开始私有冒险", "info");
+    return;
+  }
+  if (authState.getSnapshot().status !== "authenticated") {
+    authState.rememberReturnHash(location.hash);
+    navigate("#/login");
+    return;
+  }
   try {
     const conversation = await createConversation(workId);
     toast("冒险已开始", "success");
@@ -455,6 +627,8 @@ function renderWorldbookPanel(worldbook, entries = []) {
 
 async function renderWorkDetail(workId) {
   const work = await getWork(workId);
+  const ownership = projectOwnership(work);
+  const authenticated = authState.getSnapshot().status === "authenticated";
   let cards = orderedWorkCards(work);
   if (!cards.length && workCardIds(work).length) {
     cards = (await Promise.all(workCardIds(work).map((cardId) => getCard(cardId)))).filter(Boolean);
@@ -467,8 +641,9 @@ async function renderWorkDetail(workId) {
     <div class="page">
       <div class="page-head">
         <div>
+          <p class="story-kicker">STORY CHAPTER</p>
           <h1 class="page-title">${esc(work.title)}</h1>
-          <p class="page-subtitle">作品详情</p>
+          <p class="page-subtitle">作品详情 · 从这里继续你的故事。</p>
         </div>
         <div class="detail-actions">
           <button class="btn btn-ghost" id="back-btn">${icon("arrow-left")} 返回</button>
@@ -481,18 +656,19 @@ async function renderWorkDetail(workId) {
         <div class="detail-main">
           <div class="panel">
             <div class="panel-body section">
+              <p class="story-kicker">CHAPTER ENTRY</p>
               <h2 class="detail-title">${esc(work.title)}</h2>
               ${tags ? `<div class="tag-list">${tags}</div>` : ""}
               <p class="detail-description">${esc(work.description || "")}</p>
               <div class="detail-meta">
+                <span>${esc(ownership.ownerLabel)}${ownership.canEdit ? " · 我的" : " · 只读"}</span>
                 <span>创建于 ${formatTime(work.created_at)}</span>
                 <span>${roleCardSummaryHtml(cards)}</span>
                 <span>${worldbook ? `世界书：${esc(worldbook.title)}` : "无世界书"}</span>
               </div>
               <div class="detail-actions">
                 <button class="btn btn-primary" id="start-btn">${icon("play")} 开始冒险</button>
-                <button class="btn btn-ghost" id="edit-work-btn">${icon("pen")} 编辑作品</button>
-                <button class="btn btn-danger" id="delete-work-btn">${icon("trash")} 删除剧本</button>
+                ${ownership.canEdit ? `<button class="btn btn-ghost" id="edit-work-btn">${icon("pen")} 编辑作品</button><button class="btn btn-danger" id="delete-work-btn">${icon("trash")} 删除剧本</button>` : `<span class="detail-meta">${esc(ownership.readOnlyReason)}</span>`}
               </div>
             </div>
           </div>
@@ -500,16 +676,16 @@ async function renderWorkDetail(workId) {
             <h2 class="section-title">开场剧情</h2>
             <div class="panel"><div class="panel-body message ai"><span class="message-label">开场</span><span>${esc(work.opening || "故事从这里开始。")}</span></div></div>
           </section>
-          <section class="section" aria-labelledby="conversation-section-title">
+          ${authenticated ? `<section class="section" aria-labelledby="conversation-section-title">
             <div class="section-head">
               <div>
                 <h2 class="section-title" id="conversation-section-title">冒险记录</h2>
                 <p class="section-hint">从上次离开的地方继续，或开启一段新的冒险。</p>
               </div>
-              <button class="btn btn-primary btn-sm" id="new-adventure-btn">${icon("play")} 新建冒险</button>
+              <button class="btn btn-primary btn-sm" id="new-adventure-btn">${icon("play")} 继续冒险</button>
             </div>
             <div class="panel"><div class="panel-body" id="conversation-list" aria-live="polite">${conversationListLoadingHtml()}</div></div>
-          </section>
+          </section>` : `<section class="section"><div class="panel"><div class="panel-body section"><h2 class="section-title">私有冒险</h2><p class="detail-description">登录后才能查看或开始自己的冒险记录。</p><button class="btn btn-primary" id="login-to-adventure">登录后开始</button></div></div></section>`}
           ${renderCardsPanel(cards)}
           ${worldbook ? renderWorldbookPanel(worldbook, entries) : ""}
         </div>
@@ -530,7 +706,11 @@ async function renderWorkDetail(workId) {
     }
   });
   $("#new-adventure-btn")?.addEventListener("click", () => startWork(workId));
-  loadConversationList(workId);
+  $("#login-to-adventure")?.addEventListener("click", () => {
+    authState.rememberReturnHash(location.hash);
+    navigate("#/login");
+  });
+  if (authenticated) loadConversationList(workId);
 }
 
 function conversationListLoadingHtml() {
@@ -687,6 +867,7 @@ async function renderCardResults() {
     ? cards.map((card) => {
       const references = referencedWorksForCard(card.id, works);
       const referenceNames = referencedWorkNames(references).join("、");
+      const ownership = projectOwnership(card);
       return `
         <article class="resource-card">
           <div class="resource-card-body">
@@ -695,11 +876,10 @@ async function renderCardResults() {
               <span class="tag">${references.length} 个剧本引用</span>
             </div>
             <p class="resource-card-description">${esc(cardPersonalitySummary(card))}</p>
-            <p class="resource-card-meta">来源：${esc(card.source || "未标注来源")} · ${references.length ? `引用：${esc(referenceNames)}` : "尚未被剧本引用"}</p>
+            <p class="resource-card-meta">${esc(ownership.ownerLabel)}${ownership.canEdit ? " · 我的" : " · 只读"} · 来源：${esc(card.source || "未标注来源")} · ${references.length ? `引用：${esc(referenceNames)}` : "尚未被剧本引用"}</p>
           </div>
           <div class="resource-card-actions">
-            <button class="btn btn-ghost" type="button" data-card-action="edit" data-card-id="${Number(card.id)}">${icon("edit")} 编辑</button>
-            <button class="btn btn-danger" type="button" data-card-action="delete" data-card-id="${Number(card.id)}">${icon("trash")} 删除</button>
+            ${ownership.canEdit ? `<button class="btn btn-ghost" type="button" data-card-action="edit" data-card-id="${Number(card.id)}">${icon("edit")} 编辑</button><button class="btn btn-danger" type="button" data-card-action="delete" data-card-id="${Number(card.id)}">${icon("trash")} 删除</button>` : `<span class="detail-meta">只读内容</span>`}
           </div>
         </article>`;
     }).join("")
@@ -915,6 +1095,20 @@ async function loadCardIntoEditor(cardId) {
 
 async function renderCardEditor(cardId = null) {
   const isEditing = Number.isFinite(Number(cardId)) && Number(cardId) > 0;
+  if (isEditing && (MODE !== "offline" || isAccountMode())) {
+    try {
+      const currentCard = await getCard(cardId);
+      if (!projectOwnership(currentCard).canEdit) {
+        toast("只有角色卡创建者可以编辑此角色卡", "info");
+        navigate("#/cards");
+        return;
+      }
+    } catch (error) {
+      toast(error.message || "无法读取角色卡权限", "error");
+      navigate("#/cards");
+      return;
+    }
+  }
   cardEditorState = { cardId: isEditing ? Number(cardId) : null, initialState: {}, loaded: !isEditing };
   appEl.innerHTML = `
     <div class="page">
@@ -1153,8 +1347,7 @@ function bindSettingsEvents() {
 
 function initTheme() {
   const saved = localStorage.getItem(THEME_KEY);
-  const prefersLight = window.matchMedia?.("(prefers-color-scheme: light)").matches;
-  document.documentElement.dataset.theme = saved === "light" || (!saved && prefersLight) ? "light" : "dark";
+  document.documentElement.dataset.theme = saved === "dark" ? "dark" : "light";
   updateThemeIcon();
   themeToggle?.addEventListener("click", () => {
     const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
@@ -1205,7 +1398,11 @@ function showAgeGate() {
 }
 
 async function startApp() {
-  await initializeData();
+  configureDataAccess({ apiClient, readOnlyAdapter: readOnlyDemoAdapter });
+  clearLegacyApiKeyDraft();
+  const [dataStatus, authSnapshot] = await Promise.all([initializeData(), authState.bootstrap()]);
+  backendAvailable = dataStatus?.available !== false;
+  if (authSnapshot.status === "authenticated") await refreshAccountMode();
   updateModeBadge();
   window.addEventListener("hashchange", handleHashChange);
   window.addEventListener("beforeunload", handleBeforeUnload);
@@ -1213,12 +1410,14 @@ async function startApp() {
 }
 
 function init() {
+  initWorkspace();
   initTheme();
   mountIcons(document);
-  if (localStorage.getItem(AGE_KEY) !== "1") {
-    showAgeGate();
-    return;
-  }
+  authState.subscribe((snapshot) => {
+    if (snapshot.status === "authenticated") void refreshAccountMode();
+    else if (backendAvailable) applyAccountConfigMode({});
+    updateModeBadge();
+  });
   startApp();
 }
 

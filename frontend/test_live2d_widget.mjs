@@ -11,7 +11,7 @@ const localLoaderUrl = "vendor/live2d-widget/autoload.js";
 test("loads one local Live2D autoloader after the app module", () => {
   assert.equal(indexSource.split('id="live2d-widget-loader"').length - 1, 1);
   assert.equal(indexSource.split(localLoaderUrl).length - 1, 1);
-  const appScriptIndex = indexSource.indexOf('src="js/main.js?v=options-2"');
+  const appScriptIndex = indexSource.indexOf('src="js/main.js?v=account-ui-1"');
   const widgetScriptIndex = indexSource.indexOf('id="live2d-widget-loader"');
   assert.ok(appScriptIndex >= 0);
   assert.ok(widgetScriptIndex > appScriptIndex);

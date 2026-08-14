@@ -30,7 +30,14 @@ const PATHS = {
   trash: '<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>',
   alert: '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>',
   clock: '<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>',
-  user: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle>'
+  user: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle>',
+  bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path>',
+  key: '<circle cx="7.5" cy="15.5" r="5.5"></circle><path d="m21 2-9.6 9.6"></path><path d="m15.5 7.5 2 2L21 6"></path>',
+  "log-out": '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line>',
+  "chevron-down": '<polyline points="6 9 12 15 18 9"></polyline>',
+  sparkles: '<path d="m12 3-1.2 4.8L6 9l4.8 1.2L12 15l1.2-4.8L18 9l-4.8-1.2L12 3z"></path><path d="m19 14-.7 2.3L16 17l2.3.7L19 20l.7-2.3L22 17l-2.3-.7L19 14z"></path><path d="m5 14-.6 2L2.5 17l1.9.6L5 19.5l.6-1.9 1.9-.6-1.9-.6L5 14z"></path>',
+  sidebar: '<rect x="3" y="4" width="18" height="16" rx="2"></rect><line x1="9" y1="4" x2="9" y2="20"></line><path d="M13 12h6"></path><polyline points="16 9 19 12 16 15"></polyline>',
+  "sidebar-collapse": '<line x1="3" y1="7" x2="17" y2="7"></line><line x1="3" y1="12" x2="17" y2="12"></line><line x1="3" y1="17" x2="17" y2="17"></line><polyline points="21 9 18 12 21 15"></polyline>'
 };
 
 export function icon(name, label = "") {
@@ -41,7 +48,14 @@ export function icon(name, label = "") {
 
 export function mountIcons(scope = document) {
   scope.querySelectorAll("[data-icon]").forEach((node) => {
-    node.innerHTML = icon(node.dataset.icon);
+    const markup = icon(node.dataset.icon);
+    if (node.matches("a[data-nav]")) node.insertAdjacentHTML("afterbegin", markup);
+    else if (node.matches(".workspace-toggle")) {
+      const mark = node.querySelector(".workspace-toggle-mark");
+      if (mark && !mark.querySelector("svg")) mark.innerHTML = markup;
+      else if (!node.querySelector("svg")) node.innerHTML = markup;
+    }
+    else if (!node.querySelector("svg")) node.innerHTML = markup;
   });
 }
 

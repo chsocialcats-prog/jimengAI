@@ -64,7 +64,7 @@ def _quest_text(quest):
     return str(quest)
 
 
-def handle_command(conversation_id, content):
+def handle_command(access, content):
     """执行快捷指令，返回要写入消息的文本和元数据；非指令返回 None。"""
     parsed = parse_command(content)
     if parsed is None:
@@ -82,14 +82,14 @@ def handle_command(conversation_id, content):
         return {"content": text, "metadata": {"kind": "command", "command": name}}
 
     if name == "status":
-        state = state_service.get_state(conversation_id)
+        state = state_service.get_state(access)
         return {
             "content": _format_state(state),
             "metadata": {"kind": "command", "command": name},
         }
 
     if name == "inventory":
-        state = state_service.get_state(conversation_id)
+        state = state_service.get_state(access)
         items = state.get("items") or []
         text = (
             "背包："
@@ -101,7 +101,7 @@ def handle_command(conversation_id, content):
     if name == "save":
         snapshot_name = argument.strip() or "手动存档"
         snapshot = snapshot_service.create_manual_snapshot(
-            conversation_id,
+            access,
             name=snapshot_name,
             note="对话内手动存档",
         )
@@ -112,7 +112,7 @@ def handle_command(conversation_id, content):
         }
 
     if name == "autosave":
-        snapshot = snapshot_service.autosave(conversation_id)
+        snapshot = snapshot_service.autosave(access)
         text = f"已更新自动存档 #{snapshot['id']}"
         return {
             "content": text,
@@ -124,7 +124,7 @@ def handle_command(conversation_id, content):
             snapshot_id = int(argument.strip())
         except ValueError as exc:
             raise ValueError("读档指令格式：/load 存档ID") from exc
-        state = snapshot_service.restore_snapshot(conversation_id, snapshot_id)
+        state = snapshot_service.restore_snapshot(access, snapshot_id)
         if state is None:
             raise ValueError("存档不存在或不属于当前会话")
         text = f"已读档 #{snapshot_id}，状态与对话历史已恢复。"

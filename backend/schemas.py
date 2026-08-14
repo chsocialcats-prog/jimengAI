@@ -5,6 +5,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from .api_models.adventure import ConversationBranchCreate
+
 
 class CardCreate(BaseModel):
     name: str

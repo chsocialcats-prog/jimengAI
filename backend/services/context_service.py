@@ -5,9 +5,12 @@ import copy
 from dataclasses import dataclass
 
 from ..ai.deepseek_client import create_client, estimate_messages_tokens, estimate_tokens
+from ..ai.request_policy import AIRequestPolicyError
 from .. import config as config_module
+from ..auth.types import ConversationAccess
 from .. import repositories
 from . import adventure_engine
+from .user_ai_settings import EffectiveAIConfig
 
 
 @dataclass
@@ -31,7 +34,10 @@ class PreparedContext:
 def _generation(config):
     """Return the supplied settings, filling any missing approved defaults."""
     generation = copy.deepcopy(config_module.DEFAULT_CONFIG["generation"])
-    supplied = (config or {}).get("generation", {})
+    if isinstance(config, EffectiveAIConfig):
+        supplied = config.generation
+    else:
+        supplied = (config or {}).get("generation", {})
     if isinstance(supplied, dict):
         generation.update(supplied)
     return generation
@@ -174,7 +180,7 @@ def _local_summary(
 
 
 def _build_final_prompt(
-    conversation_id,
+    access,
     generation,
     summary,
     initial_recent_count,
@@ -189,7 +195,7 @@ def _build_final_prompt(
 
     def build(summary_value, recent_value):
         messages = adventure_engine.build_messages(
-            conversation_id,
+            access,
             recent_count=recent_value,
             summary_override=summary_value,
             summary_boundary_override=covered_until_sequence,
@@ -226,12 +232,14 @@ def _build_final_prompt(
     return messages, prompt_tokens
 
 
-def inspect_context(conversation_id, config):
+def inspect_context(access, config):
     """Estimate the configured prompt without changing persistent state."""
+    if not isinstance(access, ConversationAccess):
+        raise TypeError("inspect_context requires ConversationAccess")
     generation = _generation(config)
     recent_count = generation["compression_keep_recent_messages"]
     messages = adventure_engine.build_messages(
-        conversation_id,
+        access,
         recent_count=recent_count,
     )
     prompt_tokens = estimate_messages_tokens(messages)
@@ -250,13 +258,18 @@ def inspect_context(conversation_id, config):
     )
 
 
-def prepare_context(conversation_id, config, inspection=None):
+def prepare_context(access, config, request_policy=None, inspection=None):
     """Compress only new archive messages and return the final prompt."""
+    if not isinstance(access, ConversationAccess):
+        raise TypeError("prepare_context requires ConversationAccess")
     generation = _generation(config)
     if inspection is None:
-        inspection = inspect_context(conversation_id, config)
+        inspection = inspect_context(access, config)
 
-    record = repositories.get_memory_summary_record(conversation_id)
+    conversation_id = access.conversation["id"]
+    user_id = access.auth.user.id
+
+    record = repositories.get_memory_summary_record(conversation_id, user_id)
     previous_summary = record.get("summary", "") or ""
     covered_until_sequence = int(record.get("covered_until_sequence", -1))
 
@@ -270,7 +283,7 @@ def prepare_context(conversation_id, config, inspection=None):
             covered_until_sequence=covered_until_sequence,
         )
 
-    history = repositories.get_messages(conversation_id)
+    history = repositories.get_messages(conversation_id, user_id)
     keep_recent = generation["compression_keep_recent_messages"]
     delta_messages = _new_archive(
         history,
@@ -293,15 +306,22 @@ def prepare_context(conversation_id, config, inspection=None):
             + _summary_budget(generation)
             >= int(generation["context_window_tokens"])
         )
-        if config.get("deepseek", {}).get("api_key") and not source_is_oversized:
+        has_api_key = (
+            config.ai_enabled
+            if isinstance(config, EffectiveAIConfig)
+            else bool(config.get("deepseek", {}).get("api_key"))
+        )
+        if has_api_key and not source_is_oversized:
             try:
                 summary = _read_summary_output(
-                    create_client(config),
+                    create_client(config, request_policy),
                     summary_messages,
                     _summary_budget(generation),
                 )
                 if summary:
                     method = "ai"
+            except AIRequestPolicyError:
+                raise
             except Exception:
                 summary = ""
 
@@ -319,12 +339,13 @@ def prepare_context(conversation_id, config, inspection=None):
             conversation_id,
             summary,
             cutoff_sequence,
+            user_id=user_id,
         )
         covered_until_sequence = cutoff_sequence
         compressed = True
 
     final_messages, final_tokens = _build_final_prompt(
-        conversation_id,
+        access,
         generation,
         summary,
         keep_recent,

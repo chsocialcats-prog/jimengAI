@@ -12,7 +12,7 @@ class OnboardingTests(IsolatedDatabaseTestCase):
 
     def setUp(self):
         super().setUp()
-        self.work = repositories.create_work({"title": "测试剧本", "opening": "开场"})
+        self.work = repositories.create_work({"title": "测试剧本", "opening": "开场"}, owner_user_id=self.test_user.id)
 
     def tearDown(self):
         super().tearDown()
@@ -24,8 +24,8 @@ class OnboardingTests(IsolatedDatabaseTestCase):
             "allow_freeform": True,
             "fields": [{"key": "player_role", "label": "身份", "type": "text", "required": True}],
         }
-        work = repositories.update_work(self.work["id"], {"onboarding": config})
-        conversation = repositories.create_conversation(work["id"], "测试")
+        work = repositories.update_work(self.work["id"], {"onboarding": config}, owner_user_id=self.test_user.id)
+        conversation = repositories.create_conversation(work["id"], "测试", user_id=self.test_user.id)
         self.assertEqual(conversation["onboarding_status"], "pending")
         self.assertEqual(conversation["onboarding_config"]["fields"][0]["key"], "player_role")
         self.assertEqual(conversation["onboarding_config"]["fields"][0]["placeholder"], "")
@@ -40,14 +40,14 @@ class OnboardingTests(IsolatedDatabaseTestCase):
     def test_completion_persists_answers_and_injects_context(self):
         work = repositories.update_work(self.work["id"], {"onboarding": {"enabled": True, "fields": [
             {"key": "player_role", "label": "身份", "type": "text", "required": True}
-        ]}})
-        conversation = repositories.create_conversation(work["id"], "测试")
+        ]}}, owner_user_id=self.test_user.id)
+        conversation = repositories.create_conversation(work["id"], "测试", user_id=self.test_user.id)
         with self.assertRaisesRegex(ValueError, "player_role"):
-            repositories.complete_conversation_onboarding(conversation["id"], {})
-        completed = repositories.complete_conversation_onboarding(conversation["id"], {"player_role": "哲"})
+            repositories.complete_conversation_onboarding(conversation["id"], {}, user_id=self.test_user.id)
+        completed = repositories.complete_conversation_onboarding(conversation["id"], {"player_role": "哲"}, user_id=self.test_user.id)
         self.assertEqual(completed["onboarding_status"], "completed")
         self.assertEqual(completed["onboarding_answers"]["player_role"], "哲")
-        self.assertIn("哲", adventure_engine.build_messages(completed["id"])[0]["content"])
+        self.assertIn("哲", adventure_engine.build_messages(self.access_for(completed))[0]["content"])
 
 
 if __name__ == "__main__":

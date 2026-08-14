@@ -7,7 +7,7 @@
   "deepseek": {
     "base_url": "https://api.deepseek.com",
     "model": "deepseek-v4-flash",
-    "api_key": "sk-6083a3780ad74c39aaa009e115d361f2",
+    "api_key": "",
     "timeout_seconds": 60
   },
   "generation": {

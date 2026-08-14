@@ -10,15 +10,16 @@ from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
-from .config import PROJECT_ROOT
+from .config import DATA_DIR
+from .migrations.account_schema import migrate_account_schema
 
-DATA_DIR = PROJECT_ROOT / "data"
 DB_PATH = DATA_DIR / "app.db"
 
 SCHEMA = """
 -- 角色卡：人设、说话方式、关系、固定设定和初始状态
 CREATE TABLE IF NOT EXISTS cards (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     name TEXT NOT NULL,
     persona TEXT NOT NULL DEFAULT '',
     personality TEXT NOT NULL DEFAULT '',
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS cards (
 -- 世界书：一组按关键词触发注入的设定条目
 CREATE TABLE IF NOT EXISTS worldbooks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     title TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
@@ -57,6 +59,7 @@ CREATE TABLE IF NOT EXISTS worldbook_entries (
 -- 作品：角色卡、世界书与开场剧情的组合
 CREATE TABLE IF NOT EXISTS works (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     title TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     card_id INTEGER REFERENCES cards(id) ON DELETE SET NULL,
@@ -84,6 +87,7 @@ CREATE TABLE IF NOT EXISTS work_cards (
 -- 冒险会话：一次游玩记录，当前状态和分支信息放在这里
 CREATE TABLE IF NOT EXISTS conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     work_id INTEGER REFERENCES works(id) ON DELETE SET NULL,
     card_id INTEGER REFERENCES cards(id) ON DELETE SET NULL,
     worldbook_id INTEGER REFERENCES worldbooks(id) ON DELETE SET NULL,
@@ -515,6 +519,7 @@ def init_db():
                 "ALTER TABLE memory_summaries ADD COLUMN covered_until_sequence INTEGER NOT NULL DEFAULT -1",
             )
             connection.execute("PRAGMA user_version = 2")
+            migrate_account_schema(connection)
             connection.commit()
         except Exception:
             if connection.in_transaction:

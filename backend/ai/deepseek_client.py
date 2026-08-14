@@ -2,32 +2,48 @@
 """DeepSeek OpenAI 兼容流式客户端与无 Key 时的本地模拟客户端。"""
 
 import json
+import http.client
+import socket
 import urllib.error
 import urllib.request
+
+from .request_policy import AIRequestPolicyError
 
 
 class DeepSeekError(Exception):
     """DeepSeek 请求失败时抛出的中文错误。"""
 
 
-def discover_models(config):
+def discover_models(config, request_policy=None):
     """Fetch and normalize the models advertised by an OpenAI-compatible API."""
-    deepseek = config.get("deepseek", {})
-    api_key = deepseek.get("api_key", "")
+    deepseek = config.get("deepseek", {}) if isinstance(config, dict) else {}
+    api_key = deepseek.get("api_key", "") if isinstance(config, dict) else config.api_key
     if not api_key:
         raise DeepSeekError("DeepSeek API Key 未配置")
 
-    base_url = str(deepseek.get("base_url", "")).rstrip("/")
+    base_url = str(deepseek.get("base_url", "") if isinstance(config, dict) else config.base_url).rstrip("/")
+    approved_url = None
+    if request_policy is not None:
+        approved_url = request_policy.validate_base_url(base_url)
+        base_url = approved_url.base_url
     request = urllib.request.Request(
         f"{base_url}/models",
         headers={"Authorization": f"Bearer {api_key}"},
         method="GET",
     )
     try:
-        with urllib.request.urlopen(
-            request,
-            timeout=float(deepseek.get("timeout_seconds", 60)),
-        ) as response:
+        timeout = float(
+            deepseek.get("timeout_seconds", 60)
+            if isinstance(config, dict)
+            else config.timeout_seconds
+        )
+        if request_policy is None:
+            response_context = urllib.request.urlopen(request, timeout=timeout)
+        else:
+            response_context = _open_policy_request(
+                request, request_policy, approved_url, timeout
+            )
+        with response_context as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         if exc.code in (401, 403):
@@ -89,16 +105,28 @@ def _extract_error_message(body):
 class DeepSeekClient:
     """使用标准库调用 DeepSeek 官方 OpenAI 兼容接口。"""
 
-    def __init__(self, config):
-        self.base_url = config["deepseek"]["base_url"].rstrip("/")
-        self.model = config["deepseek"]["model"]
-        self.api_key = config["deepseek"].get("api_key", "")
-        self.timeout_seconds = float(
-            config["deepseek"].get("timeout_seconds", 60)
-        )
-        self.temperature = float(config["generation"].get("temperature", 0.8))
-        self.max_tokens = int(config["generation"].get("max_tokens", 2048))
-        self.reasoning_effort = config["generation"].get("reasoning_effort", "off")
+    def __init__(self, config, request_policy=None):
+        if isinstance(config, dict):
+            deepseek = config["deepseek"]
+            generation = config["generation"]
+            self.base_url = deepseek["base_url"].rstrip("/")
+            self.model = deepseek["model"]
+            self.api_key = deepseek.get("api_key", "")
+            self.timeout_seconds = float(deepseek.get("timeout_seconds", 60))
+        else:
+            self.base_url = config.base_url.rstrip("/")
+            self.model = config.model
+            self.api_key = config.api_key
+            self.timeout_seconds = float(config.timeout_seconds)
+            generation = config.generation
+        self.request_policy = request_policy
+        self.approved_url = None
+        if request_policy is not None:
+            self.approved_url = request_policy.validate_base_url(self.base_url)
+            self.base_url = self.approved_url.base_url
+        self.temperature = float(generation.get("temperature", 0.8))
+        self.max_tokens = int(generation.get("max_tokens", 2048))
+        self.reasoning_effort = generation.get("reasoning_effort", "off")
 
     def stream_chat(self, messages, max_tokens=None):
         """流式请求 chat completions，逐个产出 delta 和 usage 事件。
@@ -163,7 +191,18 @@ class DeepSeekClient:
             },
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+        if self.request_policy is None:
+            response_context = urllib.request.urlopen(
+                request, timeout=self.timeout_seconds
+            )
+        else:
+            response_context = _open_policy_request(
+                request,
+                self.request_policy,
+                self.approved_url,
+                self.timeout_seconds,
+            )
+        with response_context as response:
             for raw_line in response:
                 line = raw_line.decode("utf-8", errors="replace").strip()
                 if not line.startswith("data:"):
@@ -255,8 +294,77 @@ class MockDeepSeekClient:
         return reply
 
 
-def create_client(config):
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never forward bearer credentials across an HTTP redirect."""
+
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(request.full_url, code, msg, headers, fp)
+
+
+class _PolicyConnectionMixin:
+    def __init__(self, *args, request_policy, approved_url, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._request_policy = request_policy
+        self._approved_url = approved_url
+        self._create_connection = self._create_approved_connection
+
+    def _create_approved_connection(self, address, timeout, source_address=None):
+        approved_address = self._request_policy.resolve_connection_address(
+            self._approved_url
+        )
+        return socket.create_connection(
+            (approved_address, address[1]), timeout, source_address
+        )
+
+
+def _connection_type(base_class, request_policy, approved_url):
+    class PolicyConnection(_PolicyConnectionMixin, base_class):
+        def __init__(self, *args, **kwargs):
+            super().__init__(
+                *args,
+                request_policy=request_policy,
+                approved_url=approved_url,
+                **kwargs,
+            )
+
+    return PolicyConnection
+
+
+class _PolicyHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, request_policy, approved_url):
+        super().__init__()
+        self._connection_type = _connection_type(
+            http.client.HTTPConnection, request_policy, approved_url
+        )
+
+    def http_open(self, request):
+        return self.do_open(self._connection_type, request)
+
+
+class _PolicyHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, request_policy, approved_url):
+        super().__init__()
+        self._connection_type = _connection_type(
+            http.client.HTTPSConnection, request_policy, approved_url
+        )
+
+    def https_open(self, request):
+        return self.do_open(self._connection_type, request, context=self._context)
+
+
+def _open_policy_request(request, request_policy, approved_url, timeout):
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        _NoRedirect(),
+        _PolicyHTTPHandler(request_policy, approved_url),
+        _PolicyHTTPSHandler(request_policy, approved_url),
+    )
+    return opener.open(request, timeout=timeout)
+
+
+def create_client(config, request_policy=None):
     """按配置自动选择真实客户端或本地模拟客户端。"""
-    if config["deepseek"].get("api_key"):
-        return DeepSeekClient(config)
+    api_key = config["deepseek"].get("api_key") if isinstance(config, dict) else config.api_key
+    if api_key:
+        return DeepSeekClient(config, request_policy)
     return MockDeepSeekClient(config)

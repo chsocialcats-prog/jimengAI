@@ -11,8 +11,8 @@ from backend.test_helpers import IsolatedDatabaseTestCase
 class ConversationRepositoryCleanupTests(IsolatedDatabaseTestCase):
     def setUp(self):
         super().setUp()
-        work = repositories.create_work({"title": "清理测试", "opening": "开场"})
-        self.conversation = repositories.create_conversation(work["id"], "测试会话")
+        work = repositories.create_work({"title": "清理测试", "opening": "开场"}, owner_user_id=self.test_user.id)
+        self.conversation = repositories.create_conversation(work["id"], "测试会话", user_id=self.test_user.id)
 
     def tearDown(self):
         super().tearDown()
@@ -73,12 +73,12 @@ class ConversationRepositoryCleanupTests(IsolatedDatabaseTestCase):
 
         with patch.object(database, "fetch_one", side_effect=fetch_one):
             saved = conversation_repository.save_state(
-                conversation_id, {"money": 42}, connect_fn=database.connect
+                conversation_id, self.test_user.id, {"money": 42}, connect_fn=database.connect
             )
 
         self.assertEqual(saved["money"], 42)
         self.assertEqual(
-            repositories.get_conversation(conversation_id)["current_state"]["money"],
+            repositories.get_conversation(conversation_id, self.test_user.id)["current_state"]["money"],
             42,
         )
 
@@ -101,17 +101,18 @@ class ConversationRepositoryCleanupTests(IsolatedDatabaseTestCase):
         with patch.object(database, "fetch_one", side_effect=fetch_one):
             conversation_repository.save_memory_summary(
                 conversation_id,
+                self.test_user.id,
                 "new",
                 covered_until_sequence=8,
                 connect_fn=database.connect,
             )
 
         self.assertEqual(
-            repositories.get_memory_summary_record(conversation_id)["summary"],
+            repositories.get_memory_summary_record(conversation_id, self.test_user.id)["summary"],
             "new",
         )
         self.assertEqual(
-            repositories.get_memory_summary_record(conversation_id)[
+            repositories.get_memory_summary_record(conversation_id, self.test_user.id)[
                 "covered_until_sequence"
             ],
             8,

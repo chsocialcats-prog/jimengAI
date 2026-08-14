@@ -102,43 +102,65 @@ from .repository.works import normalize_player_attributes as _normalize_player_a
 from .repository.works import update_work as _update_work
 
 
-def delete_card(card_id):
-    return _delete_card(card_id, connect_fn=connect)
+def delete_card(card_id, *, owner_user_id):
+    """Delete an owned card through the compatibility facade.
+
+    Ownership is intentionally required at this boundary.  Callers that do
+    not have an authenticated owner must use the public read repositories;
+    the facade never invents a default or a sentinel account.
+    """
+    return _delete_card(card_id, owner_user_id=owner_user_id, connect_fn=connect)
 
 
-def create_work(data):
-    return _create_work(data, connect_fn=connect)
+def create_work(data, *, owner_user_id):
+    return _create_work(data, owner_user_id=owner_user_id, connect_fn=connect)
 
 
-def update_work(work_id, data):
-    return _update_work(work_id, data, connect_fn=connect)
+def update_work(work_id, data, *, owner_user_id):
+    return _update_work(
+        work_id, data, owner_user_id=owner_user_id, connect_fn=connect
+    )
 
 
-def save_work_bundle(work_data, worldbook_data, work_id=None):
+def save_work_bundle(work_data, worldbook_data, work_id=None, *, owner_user_id):
     return _save_work_bundle(
-        work_data, worldbook_data, work_id=work_id, connect_fn=connect
+        work_data,
+        worldbook_data,
+        work_id=work_id,
+        owner_user_id=owner_user_id,
+        connect_fn=connect,
     )
 
 
-def create_conversation(work_id, title):
-    return _create_conversation(work_id, title, connect_fn=connect)
+def create_conversation(work_id, title, *, user_id):
+    return _create_conversation(work_id, title, user_id, connect_fn=connect)
 
 
-def create_conversation_branch(source_conversation_id, title, branch_label=""):
+def create_conversation_branch(
+    source_conversation_id, title, branch_label="", snapshot_id=None, *, user_id
+):
     return _create_conversation_branch(
-        source_conversation_id, title, branch_label, connect_fn=connect
+        source_conversation_id,
+        user_id,
+        title,
+        branch_label,
+        snapshot_id,
+        connect_fn=connect,
     )
 
 
-def complete_conversation_onboarding(conversation_id, answers):
+def complete_conversation_onboarding(conversation_id, answers, *, user_id):
     return _complete_conversation_onboarding(
-        conversation_id, answers, connect_fn=connect
+        conversation_id, user_id, answers, connect_fn=connect
     )
 
 
-def create_message(conversation_id, role, content, metadata=None, token_count=0):
+def create_message(
+    conversation_id, role, content, metadata=None, token_count=0, *, user_id
+):
     return _create_message(
         conversation_id,
+        user_id,
         role,
         content,
         metadata=metadata,
@@ -147,21 +169,24 @@ def create_message(conversation_id, role, content, metadata=None, token_count=0)
     )
 
 
-def replace_messages(conversation_id, messages):
-    return _replace_messages(conversation_id, messages, connect_fn=connect)
+def replace_messages(conversation_id, messages, *, user_id):
+    return _replace_messages(conversation_id, user_id, messages, connect_fn=connect)
 
 
-def get_state(conversation_id):
-    return _get_state(conversation_id, connect_fn=connect)
+def get_state(conversation_id, *, user_id):
+    return _get_state(conversation_id, user_id, connect_fn=connect)
 
 
-def save_state(conversation_id, state):
-    return _save_state(conversation_id, state, connect_fn=connect)
+def save_state(conversation_id, state, *, user_id):
+    return _save_state(conversation_id, user_id, state, connect_fn=connect)
 
 
-def save_memory_summary(conversation_id, summary, covered_until_sequence=-1):
+def save_memory_summary(
+    conversation_id, summary, covered_until_sequence=-1, *, user_id
+):
     return _save_memory_summary(
         conversation_id,
+        user_id,
         summary,
         covered_until_sequence,
         connect_fn=connect,
@@ -174,9 +199,12 @@ def create_snapshot(
     note="",
     branch_label="",
     autosave=False,
+    *,
+    user_id,
 ):
     return _create_snapshot(
         conversation_id,
+        user_id,
         name=name,
         note=note,
         branch_label=branch_label,
@@ -185,7 +213,7 @@ def create_snapshot(
     )
 
 
-def restore_snapshot(conversation_id, snapshot_id):
+def restore_snapshot(conversation_id, snapshot_id, *, user_id):
     return _restore_snapshot(
-        conversation_id, snapshot_id, connect_fn=connect
+        conversation_id, snapshot_id, user_id, connect_fn=connect
     )

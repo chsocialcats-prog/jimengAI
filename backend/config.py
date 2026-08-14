@@ -4,9 +4,15 @@
 import copy
 import json
 import os
+import tempfile
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DATA_DIR = PROJECT_ROOT / "data"
+DATA_DIR = Path(os.environ.get("NEKO_DATA_DIR", DEFAULT_DATA_DIR)).expanduser().resolve()
+AUTH_KEY_PATH = Path(
+    os.environ.get("NEKO_AUTH_KEY_PATH", DATA_DIR / "auth_keys.json")
+).expanduser()
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 
 DEFAULT_CONFIG = {
@@ -129,3 +135,40 @@ def update_config(partial):
 def has_api_key():
     """Check whether a DeepSeek API key is currently configured."""
     return bool(load_config()["deepseek"].get("api_key", ""))
+
+
+def read_raw_legacy_config(*, config_path=CONFIG_PATH):
+    """Read only config-file JSON; intentionally never applies environment overrides."""
+    path = Path(config_path)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OSError("legacy config cannot be read") from exc
+    return data if isinstance(data, dict) else {}
+
+
+def clear_legacy_config_api_key(*, config_path=CONFIG_PATH):
+    """Atomically blank only the legacy config-file API key."""
+    path = Path(config_path)
+    data = read_raw_legacy_config(config_path=path)
+    deepseek = data.get("deepseek")
+    if not isinstance(deepseek, dict):
+        return False
+    if not deepseek.get("api_key"):
+        return False
+    updated = copy.deepcopy(data)
+    updated["deepseek"]["api_key"] = ""
+    descriptor, temporary_name = tempfile.mkstemp(prefix=".config-", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+            json.dump(updated, file, ensure_ascii=False, indent=2)
+            file.write("\n")
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary_name, path)
+    finally:
+        if os.path.exists(temporary_name):
+            os.unlink(temporary_name)
+    return True

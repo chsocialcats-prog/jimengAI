@@ -3,12 +3,15 @@
 
 import unittest
 import threading
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from backend.services import adventure_engine
 from backend.services import context_service
 from backend.services.adventure_engine import match_worldbook_entries
 from backend.routers import chat_routes
+from backend.auth.types import AuthContext, ConversationAccess, PublicUser
+from backend.services.user_ai_settings import EffectiveAIConfig
 
 
 class WorldbookMatchingTests(unittest.TestCase):
@@ -48,6 +51,29 @@ class StateInstructionTests(unittest.TestCase):
 
 
 class VisibleStateDeltaFallbackTests(unittest.TestCase):
+    def setUp(self):
+        self.access = ConversationAccess(
+            AuthContext(PublicUser(1, "stream-user", "2026-01-01T00:00:00+00:00"), 1),
+            {"id": 99, "owner_user_id": 1},
+        )
+        self.effective_config = EffectiveAIConfig(
+            base_url="https://api.deepseek.com",
+            model="test-model",
+            api_key="key",
+            generation={"max_tokens": 2048},
+            timeout_seconds=60,
+            ai_enabled=True,
+        )
+        self.recover_options = patch.object(
+            chat_routes,
+            "_recover_missing_options",
+            return_value=None,
+        )
+        self.recover_options.start()
+
+    def tearDown(self):
+        self.recover_options.stop()
+
     def test_stream_ai_reply_emits_context_events_for_compression(self):
         class ReplyClient:
             def __init__(self):
@@ -80,9 +106,7 @@ class VisibleStateDeltaFallbackTests(unittest.TestCase):
             "relations": {}, "quests": [], "flags": [],
         }
         client = ReplyClient()
-        with patch.object(chat_routes, "load_config", return_value={
-            "deepseek": {"model": "test-model", "api_key": "key"}
-        }), patch.object(
+        with patch.object(
             context_service,
             "inspect_context",
             return_value=inspection,
@@ -91,13 +115,13 @@ class VisibleStateDeltaFallbackTests(unittest.TestCase):
             "prepare_context",
             return_value=prepared,
         ), patch.object(chat_routes, "create_client", return_value=client), \
-             patch.object(chat_routes.repositories, "create_message", return_value={"id": 19}), \
-             patch.object(chat_routes.repositories, "update_message") as update_message, \
-             patch.object(chat_routes.repositories, "get_message", return_value={"metadata": {"status": "done"}}), \
+             patch.object(chat_routes.conversation_repository, "create_message", return_value={"id": 19}), \
+             patch.object(chat_routes.conversation_repository, "update_message") as update_message, \
+             patch.object(chat_routes.conversation_repository, "get_message", return_value={"metadata": {"status": "done"}}), \
              patch.object(chat_routes.state_service, "get_state", return_value=state), \
              patch.object(chat_routes.state_service, "apply_state_delta"), \
              patch.object(chat_routes.snapshot_service, "autosave"):
-            events = list(chat_routes._stream_ai_reply(99, threading.Event()))
+            events = list(chat_routes._stream_ai_reply(self.access, threading.Event(), {}, self.effective_config, None))
 
         stream = "".join(events)
         self.assertEqual(client.messages, prepared.messages)
@@ -141,24 +165,22 @@ class VisibleStateDeltaFallbackTests(unittest.TestCase):
             "attributes": {}, "items": [], "money": 0,
             "relations": {}, "quests": [], "flags": [],
         }
-        with patch.object(chat_routes, "load_config", return_value={
-            "deepseek": {"model": "test-model", "api_key": "key"}
-        }), patch.object(
+        with patch.object(
             context_service, "inspect_context", return_value=inspection
         ) as inspect_context, patch.object(
             context_service, "prepare_context", return_value=prepared
         ) as prepare_context, patch.object(
             chat_routes, "create_client", return_value=ReplyClient()
-        ), patch.object(chat_routes.repositories, "create_message", return_value={"id": 20}), \
-             patch.object(chat_routes.repositories, "update_message"), \
-             patch.object(chat_routes.repositories, "get_message", return_value={"metadata": {"status": "done"}}), \
+        ), patch.object(chat_routes.conversation_repository, "create_message", return_value={"id": 20}), \
+             patch.object(chat_routes.conversation_repository, "update_message"), \
+             patch.object(chat_routes.conversation_repository, "get_message", return_value={"metadata": {"status": "done"}}), \
              patch.object(chat_routes.state_service, "get_state", return_value=state), \
              patch.object(chat_routes.state_service, "apply_state_delta"), \
              patch.object(chat_routes.snapshot_service, "autosave"):
-            stream = "".join(chat_routes._stream_ai_reply(99, threading.Event()))
+            stream = "".join(chat_routes._stream_ai_reply(self.access, threading.Event(), {}, self.effective_config, None))
 
         inspect_context.assert_called_once()
-        prepare_context.assert_called_once_with(99, {"deepseek": {"model": "test-model", "api_key": "key"}}, inspection=inspection)
+        prepare_context.assert_called_once_with(self.access, self.effective_config, request_policy=None, inspection=inspection)
         self.assertNotIn("event: context", stream)
 
     def test_stream_ai_reply_does_not_leave_context_status_open_without_archive_work(self):
@@ -184,9 +206,7 @@ class VisibleStateDeltaFallbackTests(unittest.TestCase):
             "attributes": {}, "items": [], "money": 0,
             "relations": {}, "quests": [], "flags": [],
         }
-        with patch.object(chat_routes, "load_config", return_value={
-            "deepseek": {"model": "test-model", "api_key": "key"}
-        }), patch.object(
+        with patch.object(
             context_service,
             "inspect_context",
             return_value=inspection,
@@ -199,14 +219,14 @@ class VisibleStateDeltaFallbackTests(unittest.TestCase):
             "create_client",
             return_value=ReplyClient(),
         ), patch.object(
-            chat_routes.repositories,
+            chat_routes.conversation_repository,
             "create_message",
             return_value={"id": 21},
         ), patch.object(
-            chat_routes.repositories,
+            chat_routes.conversation_repository,
             "update_message",
         ), patch.object(
-            chat_routes.repositories,
+            chat_routes.conversation_repository,
             "get_message",
             return_value={"metadata": {"status": "done"}},
         ), patch.object(
@@ -220,7 +240,7 @@ class VisibleStateDeltaFallbackTests(unittest.TestCase):
             chat_routes.snapshot_service,
             "autosave",
         ):
-            stream = "".join(chat_routes._stream_ai_reply(99, threading.Event()))
+            stream = "".join(chat_routes._stream_ai_reply(self.access, threading.Event(), {}, self.effective_config, None))
 
         self.assertIn('event: context\ndata: {"status": "compressing"}', stream)
         self.assertIn('"status": "fallback"', stream)
@@ -262,20 +282,18 @@ class VisibleStateDeltaFallbackTests(unittest.TestCase):
             preparation_calls.append(True)
             return prepared
 
-        with patch.object(chat_routes, "load_config", return_value={
-            "deepseek": {"model": "test-model", "api_key": "key"}
-        }), patch.object(
+        with patch.object(
             context_service, "inspect_context", return_value=inspection
         ), patch.object(
             context_service, "prepare_context", side_effect=prepare
         ), patch.object(
             chat_routes, "create_client", return_value=ReplyClient()
         ), patch.object(
-            chat_routes.repositories, "create_message", return_value={"id": 22}
+            chat_routes.conversation_repository, "create_message", return_value={"id": 22}
         ), patch.object(
-            chat_routes.repositories, "update_message"
+            chat_routes.conversation_repository, "update_message"
         ), patch.object(
-            chat_routes.repositories, "get_message", return_value={"metadata": {"status": "done"}}
+            chat_routes.conversation_repository, "get_message", return_value={"metadata": {"status": "done"}}
         ), patch.object(
             chat_routes.state_service, "get_state", return_value=state
         ), patch.object(
@@ -283,7 +301,7 @@ class VisibleStateDeltaFallbackTests(unittest.TestCase):
         ), patch.object(
             chat_routes.snapshot_service, "autosave"
         ):
-            stream = chat_routes._stream_ai_reply(99, threading.Event())
+            stream = chat_routes._stream_ai_reply(self.access, threading.Event(), {}, self.effective_config, None)
             first_event = next(stream)
             self.assertIn('event: context\ndata: {"status": "compressing"}', first_event)
             self.assertFalse(preparation_calls)
@@ -334,13 +352,11 @@ class VisibleStateDeltaFallbackTests(unittest.TestCase):
             "attributes": {"心情": 55}, "items": [], "money": 0,
             "relations": {}, "quests": [], "flags": [],
         }
-        with patch.object(chat_routes, "load_config", return_value={
-            "deepseek": {"model": "test-model", "api_key": "key"}
-        }), patch.object(chat_routes.adventure_engine, "build_messages", return_value=[]), \
+        with patch.object(chat_routes.adventure_engine, "build_messages", return_value=[]), \
              patch.object(chat_routes, "create_client", return_value=VisibleOnlyClient()), \
-             patch.object(chat_routes.repositories, "create_message", return_value={"id": 17}), \
-             patch.object(chat_routes.repositories, "update_message"), \
-             patch.object(chat_routes.repositories, "get_message", return_value={"metadata": {"status": "done"}}), \
+             patch.object(chat_routes.conversation_repository, "create_message", return_value={"id": 17}), \
+             patch.object(chat_routes.conversation_repository, "update_message"), \
+             patch.object(chat_routes.conversation_repository, "get_message", return_value={"metadata": {"status": "done"}}), \
              patch.object(chat_routes.state_service, "get_state", return_value=state), \
              patch.object(chat_routes.state_service, "apply_state_delta") as apply_delta, \
              patch.object(chat_routes.state_service, "format_state_delta_for_player") as format_notice, \
@@ -359,10 +375,10 @@ class VisibleStateDeltaFallbackTests(unittest.TestCase):
                  ),
              ), \
              patch.object(chat_routes.snapshot_service, "autosave"):
-            events = list(chat_routes._stream_ai_reply(99, threading.Event()))
+            events = list(chat_routes._stream_ai_reply(self.access, threading.Event(), {}, self.effective_config, None))
 
         apply_delta.assert_called_once_with(
-            99, {"attributes": {"心情": "+5"}}, source="test-model"
+            self.access, {"attributes": {"心情": "+5"}}, source="test-model"
         )
         format_notice.assert_not_called()
         self.assertEqual("".join(events).count("【状态变化】"), 1)
@@ -413,14 +429,12 @@ class VisibleStateDeltaFallbackTests(unittest.TestCase):
             "relations": {}, "quests": [], "flags": [],
             "characters": {"塞西莉亚": {"attributes": {"好感度": 0}, "flags": []}},
         }
-        with patch.object(chat_routes, "load_config", return_value={
-            "deepseek": {"model": "test-model", "api_key": "key"}
-        }), patch.object(chat_routes.adventure_engine, "build_messages", return_value=[
+        with patch.object(chat_routes.adventure_engine, "build_messages", return_value=[
             {"role": "user", "content": "我愿意和你一起去。"}
         ]), patch.object(chat_routes, "create_client", return_value=NarrativeOnlyClient()), \
-             patch.object(chat_routes.repositories, "create_message", return_value={"id": 18}), \
-             patch.object(chat_routes.repositories, "update_message"), \
-             patch.object(chat_routes.repositories, "get_message", return_value={"metadata": {"status": "done"}}), \
+             patch.object(chat_routes.conversation_repository, "create_message", return_value={"id": 18}), \
+             patch.object(chat_routes.conversation_repository, "update_message"), \
+             patch.object(chat_routes.conversation_repository, "get_message", return_value={"metadata": {"status": "done"}}), \
              patch.object(chat_routes.state_service, "get_state", return_value=state), \
              patch.object(chat_routes.state_service, "apply_state_delta") as apply_delta, \
              patch.object(
@@ -440,10 +454,10 @@ class VisibleStateDeltaFallbackTests(unittest.TestCase):
                  ),
              ), \
              patch.object(chat_routes.snapshot_service, "autosave"):
-            events = list(chat_routes._stream_ai_reply(99, threading.Event()))
+            events = list(chat_routes._stream_ai_reply(self.access, threading.Event(), {}, self.effective_config, None))
 
         apply_delta.assert_called_once_with(
-            99,
+            self.access,
             {"characters": {"塞西莉亚": {"attributes": {"好感度": "+1"}}}},
             source="test-model",
         )
@@ -458,6 +472,10 @@ class MemorySummaryTests(unittest.TestCase):
             "card_id": None,
             "worldbook_id": None,
         }
+        self.access = ConversationAccess(
+            AuthContext(PublicUser(1, "test-user", "now"), 1),
+            self.conversation,
+        )
         self.state = {
             "attributes": {}, "items": [], "money": 0, "relations": {},
             "quests": [], "flags": [],
@@ -472,7 +490,9 @@ class MemorySummaryTests(unittest.TestCase):
             }
             for index in range(10)
         ]
-        with patch.object(adventure_engine.repositories, "get_conversation", return_value=self.conversation), \
+        with patch.object(adventure_engine.repositories, "get_work", return_value=None), \
+             patch.object(adventure_engine.repositories, "get_conversation_cards", return_value=[]), \
+             patch.object(adventure_engine.repositories, "get_worldbook", return_value=None), \
              patch.object(adventure_engine.repositories, "get_state", return_value=self.state), \
              patch.object(adventure_engine.repositories, "get_messages", return_value=history), \
              patch.object(
@@ -481,7 +501,7 @@ class MemorySummaryTests(unittest.TestCase):
                  return_value={"summary": "saved summary", "covered_until_sequence": 1},
              ), \
              patch.object(adventure_engine.repositories, "save_memory_summary") as save_summary:
-            messages = adventure_engine.build_messages(7, recent_count=8)
+            messages = adventure_engine.build_messages(self.access, recent_count=8)
 
         system_prompt = messages[0]["content"]
         self.assertIn("saved summary", system_prompt)
@@ -501,7 +521,9 @@ class MemorySummaryTests(unittest.TestCase):
             }
             for index in range(12)
         ]
-        with patch.object(adventure_engine.repositories, "get_conversation", return_value=self.conversation), \
+        with patch.object(adventure_engine.repositories, "get_work", return_value=None), \
+             patch.object(adventure_engine.repositories, "get_conversation_cards", return_value=[]), \
+             patch.object(adventure_engine.repositories, "get_worldbook", return_value=None), \
              patch.object(adventure_engine.repositories, "get_state", return_value=self.state), \
              patch.object(adventure_engine.repositories, "get_messages", return_value=history), \
              patch.object(
@@ -510,7 +532,7 @@ class MemorySummaryTests(unittest.TestCase):
                  return_value={"summary": "", "covered_until_sequence": -1},
              ), \
              patch.object(adventure_engine.repositories, "save_memory_summary") as save_summary:
-            messages = adventure_engine.build_messages(7, recent_count=10)
+            messages = adventure_engine.build_messages(self.access, recent_count=10)
 
         self.assertEqual(
             [message["content"] for message in messages[1:]],
@@ -527,7 +549,9 @@ class MemorySummaryTests(unittest.TestCase):
             }
             for index in range(12)
         ]
-        with patch.object(adventure_engine.repositories, "get_conversation", return_value=self.conversation), \
+        with patch.object(adventure_engine.repositories, "get_work", return_value=None), \
+             patch.object(adventure_engine.repositories, "get_conversation_cards", return_value=[]), \
+             patch.object(adventure_engine.repositories, "get_worldbook", return_value=None), \
              patch.object(adventure_engine.repositories, "get_state", return_value=self.state), \
              patch.object(adventure_engine.repositories, "get_messages", return_value=history), \
              patch.object(
@@ -535,7 +559,7 @@ class MemorySummaryTests(unittest.TestCase):
                  "get_memory_summary_record",
                  return_value={"summary": "saved summary", "covered_until_sequence": 8},
              ):
-            messages = adventure_engine.build_messages(7, recent_count=10)
+            messages = adventure_engine.build_messages(self.access, recent_count=10)
 
         self.assertEqual(
             [message["content"] for message in messages[1:]],
@@ -553,7 +577,9 @@ class MemorySummaryTests(unittest.TestCase):
         ]
         for recent_count in (0, -3):
             with self.subTest(recent_count=recent_count), \
-                 patch.object(adventure_engine.repositories, "get_conversation", return_value=self.conversation), \
+                 patch.object(adventure_engine.repositories, "get_work", return_value=None), \
+                 patch.object(adventure_engine.repositories, "get_conversation_cards", return_value=[]), \
+                 patch.object(adventure_engine.repositories, "get_worldbook", return_value=None), \
                  patch.object(adventure_engine.repositories, "get_state", return_value=self.state), \
                  patch.object(adventure_engine.repositories, "get_messages", return_value=history), \
                  patch.object(
@@ -562,7 +588,7 @@ class MemorySummaryTests(unittest.TestCase):
                      return_value={"summary": "", "covered_until_sequence": -1},
                  ):
                 messages = adventure_engine.build_messages(
-                    7, recent_count=recent_count
+                    self.access, recent_count=recent_count
                 )
 
             self.assertEqual(
@@ -572,14 +598,16 @@ class MemorySummaryTests(unittest.TestCase):
 
     def test_build_messages_explicit_empty_summary_override_skips_persisted_read(self):
         history = [{"sequence": 0, "role": "user", "content": "message-0"}]
-        with patch.object(adventure_engine.repositories, "get_conversation", return_value=self.conversation), \
+        with patch.object(adventure_engine.repositories, "get_work", return_value=None), \
+             patch.object(adventure_engine.repositories, "get_conversation_cards", return_value=[]), \
+             patch.object(adventure_engine.repositories, "get_worldbook", return_value=None), \
              patch.object(adventure_engine.repositories, "get_state", return_value=self.state), \
              patch.object(adventure_engine.repositories, "get_messages", return_value=history), \
              patch.object(
                  adventure_engine.repositories,
                  "get_memory_summary_record",
              ) as get_summary:
-            messages = adventure_engine.build_messages(7, summary_override="")
+            messages = adventure_engine.build_messages(self.access, summary_override="")
 
         self.assertNotIn("早期剧情记忆摘要：", messages[0]["content"])
         get_summary.assert_not_called()
@@ -593,7 +621,9 @@ class MemorySummaryTests(unittest.TestCase):
             }
             for index in range(12)
         ]
-        with patch.object(adventure_engine.repositories, "get_conversation", return_value=self.conversation), \
+        with patch.object(adventure_engine.repositories, "get_work", return_value=None), \
+             patch.object(adventure_engine.repositories, "get_conversation_cards", return_value=[]), \
+             patch.object(adventure_engine.repositories, "get_worldbook", return_value=None), \
              patch.object(adventure_engine.repositories, "get_state", return_value=self.state), \
              patch.object(adventure_engine.repositories, "get_messages", return_value=history), \
              patch.object(
@@ -601,7 +631,7 @@ class MemorySummaryTests(unittest.TestCase):
                  "get_memory_summary_record",
              ) as get_summary:
             messages = adventure_engine.build_messages(
-                7,
+                self.access,
                 recent_count=10,
                 summary_override="",
                 summary_boundary_override=8,
@@ -694,8 +724,7 @@ class MemorySummaryTests(unittest.TestCase):
             },
             {"sequence": 1, "role": "assistant", "content": "reply-marker"},
         ]
-        with patch.object(adventure_engine.repositories, "get_conversation", return_value=conversation), \
-             patch.object(adventure_engine.repositories, "get_work", return_value=work), \
+        with patch.object(adventure_engine.repositories, "get_work", return_value=work), \
              patch.object(adventure_engine.repositories, "get_conversation_cards", return_value=[card]), \
              patch.object(adventure_engine.repositories, "get_worldbook", return_value=worldbook), \
              patch.object(adventure_engine.repositories, "get_state", return_value=state), \
@@ -705,7 +734,9 @@ class MemorySummaryTests(unittest.TestCase):
                  "get_memory_summary_record",
                  return_value={"summary": "", "covered_until_sequence": -1},
              ):
-            messages = adventure_engine.build_messages(7, recent_count=2)
+            messages = adventure_engine.build_messages(
+                ConversationAccess(self.access.auth, conversation), recent_count=2
+            )
 
         system_prompt = messages[0]["content"]
         for expected in (
@@ -726,10 +757,10 @@ class MemorySummaryTests(unittest.TestCase):
         with patch.object(adventure_engine.repositories, "get_messages", return_value=history), \
              patch.object(adventure_engine.repositories, "get_memory_summary", return_value="旧分支摘要"), \
              patch.object(adventure_engine.repositories, "save_memory_summary") as save_summary:
-            summary = adventure_engine.update_memory_summary(7)
+            summary = adventure_engine.update_memory_summary(self.access)
 
         self.assertEqual(summary, "")
-        save_summary.assert_called_once_with(7, "")
+        save_summary.assert_called_once_with(7, "", user_id=1)
 
 
 if __name__ == "__main__":

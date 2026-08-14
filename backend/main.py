@@ -10,6 +10,8 @@ W2+W3 提供：
 """
 
 from contextlib import asynccontextmanager
+import logging
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -17,19 +19,30 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .config import has_api_key
-from .database import init_db
+from .auth.account_migration import AccountMigrationService
+from .auth.http_security import AuthSecurityMiddleware
+from .auth.keyring import AuthKeyring
+from .auth.rate_limit import AuthRateLimiter
+from .auth.runtime_settings import RuntimeSettings
+from .auth.service import AuthService
+from .auth.sessions import SessionService
+from .auth.errors import SecretKeyUnavailable
+from .auth.legacy_config import warn_if_environment_legacy_key
+from .config import AUTH_KEY_PATH, CONFIG_PATH
+from .database import connect, init_db
 from .routers import (
     cards_routes,
     chat_routes,
     conversations_routes,
     imports_routes,
     settings_routes,
+    auth_routes,
     works_routes,
     worldbooks_routes,
 )
 
 FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend"
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -37,6 +50,17 @@ async def lifespan(app: FastAPI):
     """服务启动时自动创建数据库。"""
     database_path = init_db()
     app.state.database_path = str(database_path)
+    try:
+        keyring = AuthKeyring.load(AUTH_KEY_PATH)
+    except SecretKeyUnavailable:
+        keyring = None
+        logger.warning("认证主密钥不可用；认证写操作暂时停用。")
+    with connect() as connection:
+        AccountMigrationService(connection, keyring).resume_cleanup()
+        SessionService(connection).startup_cleanup()
+    warn_if_environment_legacy_key(config_path=CONFIG_PATH, environ=os.environ)
+    app.state.runtime_settings = RuntimeSettings.from_environ()
+    app.state.auth_service = AuthService(connect, keyring, rate_limiter=AuthRateLimiter())
     app.state.stop_events = {}
     yield
 
@@ -58,6 +82,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": detail},
+        headers=exc.headers,
     )
 
 
@@ -85,11 +110,11 @@ def health_check():
         "status": "ok",
         "service": "ai-adventure",
         "database": "initialized" if database_ready else "missing",
-        "ai_enabled": has_api_key(),
     }
 
 
 for router in (
+    auth_routes.router,
     settings_routes.router,
     cards_routes.router,
     imports_routes.router,
@@ -99,6 +124,9 @@ for router in (
     chat_routes.router,
 ):
     app.include_router(router)
+
+
+app.add_middleware(AuthSecurityMiddleware)
 
 
 app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

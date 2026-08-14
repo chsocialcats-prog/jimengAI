@@ -248,7 +248,15 @@ function bindMessageOptionEvents(root) {
       const value = btn.dataset.optionValue || "";
       if (value === "查看当前状态") {
         renderSidebar("state");
-        $("#status-sidebar")?.classList.add("open");
+        const sidebar = $("#status-sidebar");
+        const sidebarToggle = $("#sidebar-toggle");
+        const adventureShell = $(".adventure-shell");
+        if (sidebar) {
+          sidebar.classList.remove("desktop-hidden");
+          sidebar.classList.add("open");
+        }
+        adventureShell?.classList.remove("sidebar-collapsed");
+        sidebarToggle?.setAttribute("aria-expanded", "true");
       } else if (value === "保存进度") {
         openSaveModal();
       } else {
@@ -463,13 +471,20 @@ export async function renderAdventure(conversationId) {
   const snapshots = await getSnapshots(conversationId);
   const replyLength = MODE === "online" ? loadReplyLength(conv.id) : null;
   session = { conv, work, cards, card: cards[0] || null, messages, state, snapshots, replyLength, streaming: false, hasUnsavedProgress: false, sidebarTab: "state" };
-  appEl.innerHTML = `<div class="page"><div class="page-head"><div><h1 class="page-title">${esc(conv.title || "冒险")}</h1><p class="page-subtitle">${esc(work ? work.title : "")} · ${esc(cardSummaryText(cards))}</p></div><div class="detail-actions adventure-actions"><button class="btn btn-ghost btn-sm" id="back-btn">${icon("arrow-left")} 返回</button><button class="btn btn-ghost btn-sm adventure-utility-btn" id="sidebar-toggle"><span class="button-emoji" aria-hidden="true">🧭</span><span>状态</span></button><button class="btn btn-ghost btn-sm adventure-utility-btn" id="onboarding-review-btn"><span class="button-emoji" aria-hidden="true">✨</span><span>编辑开局设定</span></button><button class="btn btn-ghost btn-sm" id="delete-btn">${icon("trash")} 删除</button></div></div>
+  appEl.innerHTML = `<div class="page story-page"><div class="page-head story-page-head"><div class="story-context"><span class="story-context-kicker">ACTIVE CHAPTER</span><h1 class="page-title">${esc(conv.title || "冒险")}</h1><p class="page-subtitle">${esc(work ? work.title : "")} · ${esc(cardSummaryText(cards))}</p></div><div class="detail-actions adventure-actions"><button class="btn btn-ghost btn-sm" id="back-btn">${icon("arrow-left")} 返回</button><button class="btn btn-ghost btn-sm adventure-utility-btn" id="sidebar-toggle"><span class="button-emoji" aria-hidden="true">🧭</span><span>状态</span></button><button class="btn btn-ghost btn-sm adventure-utility-btn" id="onboarding-review-btn"><span class="button-emoji" aria-hidden="true">✨</span><span>编辑开局设定</span></button><button class="btn btn-ghost btn-sm" id="delete-btn">${icon("trash")} 删除</button></div></div>
     <div class="adventure-shell"><div class="conversation-pane"><div class="conversation-header"><div class="conversation-header-title"><strong>${esc(conv.title)}</strong><span></span></div><div class="session-card-summary">${esc(cardSummaryText(cards))}</div><button class="btn btn-sm btn-danger" id="stop-btn" style="display:none">${icon("stop")} 停止</button></div><div id="message-list" class="message-list"></div><div id="options-area" class="options-area"></div><div class="composer"><div class="quick-commands"><button class="quick-command" data-command="/状态">/状态</button><button class="quick-command" data-command="/背包">/背包</button><button class="quick-command" data-command="/存档">/存档</button><button class="quick-command" data-command="/帮助">/帮助</button><button class="quick-command" data-correction="persona">修正人设</button><button class="quick-command" data-correction="memory">修正记忆</button></div><div class="composer-row">${MODE === "online" ? `<label class="reply-length-control" for="reply-length-select"><span>回复长度</span><select id="reply-length-select" aria-label="回复长度">${Object.entries(REPLY_LENGTH_PRESETS).map(([key, preset]) => `<option value="${key}"${key === session.replyLength ? " selected" : ""}>${esc(preset.label)} · ${esc(preset.hint)}</option>`).join("")}</select></label>` : ""}<textarea id="composer-input" class="textarea compact" placeholder="输入你的行动..."></textarea><button class="btn btn-primary" id="send-btn">${icon("send")} 发送</button></div></div></div><aside class="status-sidebar" id="status-sidebar"><div class="sidebar-tabs"><button data-sidebar-tab="state" class="active">状态</button><button data-sidebar-tab="snapshots">存档</button></div><div id="sidebar-body" class="sidebar-body"></div></aside></div></div>`;
   bindAdventureEvents();
   $("#onboarding-review-btn")?.addEventListener("click", () => openAdventureOnboarding(session.conv, work, cards, worldbook, false));
   if (conv.onboarding_status === "pending") openAdventureOnboarding(conv, work, cards, worldbook, false);
   renderMessages();
   renderSidebar(session.sidebarTab);
+  const sidebarToggle = $("#sidebar-toggle");
+  sidebarToggle?.setAttribute("aria-controls", "status-sidebar");
+  sidebarToggle?.setAttribute("aria-expanded", "false");
+  const statusSidebar = $("#status-sidebar");
+  const adventureShell = $(".adventure-shell");
+  if (statusSidebar) statusSidebar.classList.add("desktop-hidden");
+  if (adventureShell) adventureShell.classList.add("sidebar-collapsed");
   setStreamingUi(false);
   scrollMessages();
 }
@@ -518,6 +533,7 @@ function toggleStatusSidebar() {
   if (!sidebar) return;
   if (window.matchMedia("(max-width: 960px)").matches) {
     const open = sidebar.classList.toggle("open");
+    sidebar.classList.toggle("desktop-hidden", !open);
     button?.setAttribute("aria-expanded", String(open));
     return;
   }

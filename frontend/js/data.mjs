@@ -1,4 +1,5 @@
 import { nowISO } from "./core/format.mjs";
+import { createReadOnlyDemoAdapter } from "./read-only-demo.mjs";
 
 export const MOCK_DATA_KEY = "adventure_mock_data";
 export const MOCK_SETTINGS_KEY = "adventure_mock_settings";
@@ -6,6 +7,29 @@ export const API_KEY_DRAFT_KEY = "adventure_api_key_draft";
 
 export let MODE = "offline";
 export let AI_ENABLED = false;
+
+let accountApiClient = null;
+let accountReadOnlyAdapter = null;
+let accountMode = false;
+
+export function configureDataAccess({ apiClient = null, readOnlyAdapter = null } = {}) {
+  accountApiClient = apiClient;
+  accountReadOnlyAdapter = readOnlyAdapter || createReadOnlyDemoAdapter();
+  accountMode = Boolean(apiClient);
+}
+
+export function applyAccountConfigMode(config = {}) {
+  if (!accountMode) return { mode: MODE, aiEnabled: AI_ENABLED };
+  const apiKeySet = config.api_key_set ?? config.deepseek?.api_key_set ?? false;
+  const apiKeyUnreadable = config.api_key_unreadable ?? config.deepseek?.api_key_unreadable ?? false;
+  MODE = apiKeySet && !apiKeyUnreadable ? "online" : "mock";
+  AI_ENABLED = MODE === "online";
+  return { mode: MODE, aiEnabled: AI_ENABLED };
+}
+
+export function isAccountMode() {
+  return accountMode;
+}
 
 let mockSeq = 0;
 let mockWorks = [];
@@ -125,6 +149,12 @@ export function toItems(data) {
 }
 
 async function request(path, { method = "GET", body } = {}) {
+  if (accountApiClient) {
+    if (method === "GET") return accountApiClient.get(path);
+    if (method === "POST") return accountApiClient.post(path, body);
+    if (method === "PUT") return accountApiClient.put(path, body);
+    if (method === "DELETE") return accountApiClient.delete(path);
+  }
   const response = await fetch(path, {
     method,
     headers: { "Content-Type": "application/json" },
@@ -143,6 +173,18 @@ async function request(path, { method = "GET", body } = {}) {
 }
 
 export async function detectMode() {
+  if (accountApiClient) {
+    try {
+      await request("/api/health");
+      MODE = "mock";
+      AI_ENABLED = false;
+      return { mode: MODE, aiEnabled: AI_ENABLED, available: true };
+    } catch {
+      MODE = "offline";
+      AI_ENABLED = false;
+      return { mode: MODE, aiEnabled: false, available: false };
+    }
+  }
   try {
     const health = await request("/api/health");
     MODE = health.ai_enabled ? "online" : "mock";
@@ -242,6 +284,9 @@ export function loadMockData() {
 }
 
 export async function initializeData() {
+  if (accountMode) {
+    return detectMode();
+  }
   loadMockData();
   return detectMode();
 }
@@ -250,7 +295,7 @@ function getMockCard(id) {
   return mockCards.find((card) => Number(card.id) === Number(id)) || null;
 }
 
-function filterWorks(works, query, tag) {
+export function filterWorks(works, query, tag) {
   const q = String(query || "").trim().toLowerCase();
   return works.filter((work) => {
     const matchesQ = !q || `${work.title || ""} ${work.description || ""} ${(work.tags || []).join(" ")}`.toLowerCase().includes(q);
@@ -280,6 +325,7 @@ async function listAllPages(path, params = {}) {
 }
 
 export async function listAllWorks(query = "", tag = "") {
+  if (accountMode && MODE === "offline") return filterWorks(accountReadOnlyAdapter.listWorks(), query, tag);
   if (MODE === "offline") return filterWorks(mockWorks.map((work) => ({ ...work, card: undefined, worldbook: undefined })), query, tag);
   const params = {};
   if (query) params.q = query;
@@ -290,6 +336,11 @@ export async function listAllWorks(query = "", tag = "") {
 export const listWorks = listAllWorks;
 
 export async function getWork(id) {
+  if (accountMode && MODE === "offline") {
+    const work = accountReadOnlyAdapter.listWorks().find((item) => String(item.id) === String(id));
+    if (!work) throw new Error("作品不存在");
+    return work;
+  }
   if (MODE === "offline") {
     const work = mockWorks.find((item) => Number(item.id) === Number(id));
     if (!work) throw new Error("作品不存在");
@@ -299,6 +350,10 @@ export async function getWork(id) {
 }
 
 export async function listAllCards(query = "") {
+  if (accountMode && MODE === "offline") {
+    const q = String(query || "").trim().toLowerCase();
+    return accountReadOnlyAdapter.listCards().filter((card) => !q || `${card.name || ""} ${card.persona || ""}`.toLowerCase().includes(q));
+  }
   if (MODE === "offline") {
     const q = String(query || "").trim().toLowerCase();
     return clone(mockCards.filter((card) => !q || `${card.name || ""} ${card.persona || ""} ${card.personality || ""}`.toLowerCase().includes(q)));
@@ -309,6 +364,7 @@ export async function listAllCards(query = "") {
 export const listCards = listAllCards;
 
 export async function getCard(id) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.listCards().find((card) => String(card.id) === String(id)) || null;
   if (!id) return null;
   if (MODE === "offline") {
     const card = getMockCard(id);
@@ -319,6 +375,7 @@ export async function getCard(id) {
 }
 
 export async function createCard(payload) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.create(payload);
   if (MODE === "offline") {
     const timestamp = nowISO();
     const card = { id: ++mockSeq, ...payload, created_at: timestamp, updated_at: timestamp };
@@ -330,6 +387,7 @@ export async function createCard(payload) {
 }
 
 export async function updateCard(id, payload) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.update({ id, ...payload });
   if (MODE === "offline") {
     const card = getMockCard(id);
     if (!card) throw new Error("角色卡不存在");
@@ -341,6 +399,7 @@ export async function updateCard(id, payload) {
 }
 
 export async function deleteCard(id) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.delete(id);
   if (MODE === "offline") {
     mockCards = mockCards.filter((card) => Number(card.id) !== Number(id));
     saveMockData();
@@ -350,11 +409,13 @@ export async function deleteCard(id) {
 }
 
 export async function getWorldbook(id) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.listWorldbooks().find((book) => String(book.id) === String(id)) || null;
   if (!id || MODE === "offline") return null;
   return request(`/api/worldbooks/${id}`);
 }
 
 export async function getWorldbookEntries(id) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.listWorldbooks().find((book) => String(book.id) === String(id))?.entries || [];
   if (!id || MODE === "offline") return [];
   return toItems(await request(`/api/worldbooks/${id}/entries`));
 }
@@ -380,12 +441,14 @@ function createMockConversation(work) {
 }
 
 export async function createConversation(workId) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.startAdventure(workId);
   const work = await getWork(workId);
   if (MODE === "offline") return createMockConversation(work);
   return request("/api/conversations", { method: "POST", body: { work_id: workId, title: work.title } });
 }
 
 export async function getConversation(id) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.startAdventure(id);
   if (MODE === "offline") {
     const conversation = mockConversations[id];
     if (!conversation) throw new Error("会话不存在");
@@ -395,24 +458,29 @@ export async function getConversation(id) {
 }
 
 export async function listConversations(workId) {
+  if (accountMode && MODE === "offline") return [];
   if (MODE === "offline") return clone(Object.values(mockConversations).filter((item) => Number(item.work_id) === Number(workId)).sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || ""))));
   const params = new URLSearchParams({ work_id: String(workId), page: "1", page_size: "100" });
   return toItems(await request(`/api/conversations?${params.toString()}`));
 }
 
 export async function getMessages(id) {
+  if (accountMode && MODE === "offline") return [];
   return MODE === "offline" ? clone(mockConversations[id]?.messages || []) : toItems(await request(`/api/conversations/${id}/messages`));
 }
 
 export async function getState(id) {
+  if (accountMode && MODE === "offline") return {};
   return MODE === "offline" ? clone(mockConversations[id]?.state || {}) : request(`/api/conversations/${id}/state`);
 }
 
 export async function getSnapshots(id) {
+  if (accountMode && MODE === "offline") return [];
   return MODE === "offline" ? clone(mockConversations[id]?.snapshots || []) : toItems(await request(`/api/conversations/${id}/snapshots`));
 }
 
 export async function createSnapshot(conversationId, name) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.save({ conversationId, name });
   if (MODE !== "offline") return request(`/api/conversations/${conversationId}/snapshots`, { method: "POST", body: { name: name || "未命名存档", note: "手动存档" } });
   const conversation = mockConversations[conversationId];
   const snapshot = { id: ++mockSeq, conversation_id: conversationId, name: name || "未命名存档", state: clone(conversation.state), messages: clone(conversation.messages || []), persona_corrections: clone(conversation.persona_corrections || []), memory_corrections: clone(conversation.memory_corrections || []), created_at: nowISO(), note: "手动存档" };
@@ -422,6 +490,7 @@ export async function createSnapshot(conversationId, name) {
 }
 
 export async function restoreSnapshot(conversationId, snapshotId) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.save({ conversationId, snapshotId });
   if (MODE !== "offline") return request(`/api/conversations/${conversationId}/snapshots/${snapshotId}/restore`, { method: "POST" });
   const conversation = mockConversations[conversationId];
   const snapshot = conversation.snapshots.find((item) => item.id === Number(snapshotId));
@@ -435,6 +504,7 @@ export async function restoreSnapshot(conversationId, snapshotId) {
 }
 
 export async function deleteSnapshot(conversationId, snapshotId) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.delete({ conversationId, snapshotId });
   if (MODE === "offline") {
     mockConversations[conversationId].snapshots = mockConversations[conversationId].snapshots.filter((item) => item.id !== Number(snapshotId));
     saveMockData();
@@ -444,6 +514,7 @@ export async function deleteSnapshot(conversationId, snapshotId) {
 }
 
 export async function deleteConversation(id) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.delete(id);
   if (MODE === "offline") {
     delete mockConversations[id];
     saveMockData();
@@ -453,6 +524,7 @@ export async function deleteConversation(id) {
 }
 
 export async function updateConversation(id, title) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.update({ id, title });
   if (MODE === "offline") {
     const conversation = mockConversations[id];
     if (!conversation) throw new Error("会话不存在");
@@ -465,6 +537,7 @@ export async function updateConversation(id, title) {
 }
 
 export async function deleteWork(id) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.delete(id);
   if (MODE === "offline") {
     mockWorks = mockWorks.filter((work) => Number(work.id) !== Number(id));
     Object.values(mockConversations).forEach((conversation) => { if (Number(conversation.work_id) === Number(id)) conversation.work_id = null; });
@@ -475,6 +548,7 @@ export async function deleteWork(id) {
 }
 
 export async function saveWorkBundle({ work, worldbook }) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.create({ work, worldbook });
   if (MODE !== "offline") return request("/api/works/bundle", { method: "POST", body: { work, worldbook } });
   const id = ++mockSeq;
   const savedWork = { id, ...work, worldbook_id: id, worldbook: { ...worldbook, id }, plays: 0, created_at: nowISO(), updated_at: nowISO() };
@@ -484,6 +558,7 @@ export async function saveWorkBundle({ work, worldbook }) {
 }
 
 export async function updateWorkBundle(workId, worldbookId, { work, worldbook }) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.update({ id: workId, work, worldbook });
   if (MODE !== "offline") return request(`/api/works/${workId}/bundle`, { method: "PUT", body: { work, worldbook } });
   const savedWork = mockWorks.find((item) => Number(item.id) === Number(workId));
   if (!savedWork) throw new Error("作品不存在");
@@ -498,6 +573,7 @@ export async function updateWorkBundle(workId, worldbookId, { work, worldbook })
 }
 
 export async function submitOnboarding(conversationId, answers) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.save({ conversationId, answers });
   if (MODE !== "offline") return request(`/api/conversations/${conversationId}/onboarding`, { method: "POST", body: { answers } });
   const conversation = mockConversations[conversationId];
   if (!conversation) throw new Error("会话不存在");
@@ -509,6 +585,7 @@ export async function submitOnboarding(conversationId, answers) {
 }
 
 export async function addCorrection(conversationId, kind, content) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.update({ conversationId, kind, content });
   if (MODE !== "offline") return request(`/api/conversations/${conversationId}/corrections`, { method: "POST", body: { kind, content } });
   const conversation = mockConversations[conversationId];
   if (!conversation) throw new Error("会话不存在");
@@ -520,6 +597,7 @@ export async function addCorrection(conversationId, kind, content) {
 }
 
 export async function stopConversation(conversationId) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.save({ conversationId, stopped: true });
   if (MODE === "offline") return null;
   return request(`/api/conversations/${conversationId}/stop`, { method: "POST" });
 }
@@ -580,10 +658,15 @@ async function mockStreamChat(conversationId, content, handlers) {
 }
 
 export async function streamChat(conversationId, content, handlers, metadata = {}) {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.startAdventure(conversationId);
   if (MODE === "offline") return mockStreamChat(conversationId, content, handlers);
   let response;
   try {
-    response = await fetch(`/api/conversations/${conversationId}/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content, metadata }) });
+    response = accountApiClient
+      ? await accountApiClient.openEventStream(`/api/conversations/${conversationId}/chat`, {
+        body: { content, metadata },
+      })
+      : await fetch(`/api/conversations/${conversationId}/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content, metadata }) });
   } catch (error) {
     handlers.onError?.(error.message || "无法连接对话接口");
     handlers.onFinish?.();
@@ -634,6 +717,7 @@ export async function streamChat(conversationId, content, handlers, metadata = {
 }
 
 export async function seedDemo() {
+  if (accountMode && MODE === "offline") return accountReadOnlyAdapter.create({ demo: true });
   if (MODE === "offline") {
     mockWorks = clone(DEFAULT_MOCK_WORKS);
     mockCards = deriveMockCards(mockWorks);
@@ -648,6 +732,7 @@ export async function seedDemo() {
 }
 
 export async function loadSettings() {
+  if (accountApiClient) return accountApiClient.get("/api/config");
   if (MODE !== "offline") return request("/api/config");
   try {
     return JSON.parse(localStorage.getItem(MOCK_SETTINGS_KEY) || "null") || clone(DEFAULT_SETTINGS);
@@ -657,18 +742,26 @@ export async function loadSettings() {
 }
 
 export function getApiKeyDraft() {
+  if (accountMode) return "";
   return localStorage.getItem(API_KEY_DRAFT_KEY) || "";
 }
 
 export function setApiKeyDraft(apiKey) {
+  if (accountMode) return;
   localStorage.setItem(API_KEY_DRAFT_KEY, apiKey);
 }
 
+export function clearLegacyApiKeyDraft() {
+  try { localStorage.removeItem(API_KEY_DRAFT_KEY); } catch {}
+}
+
 export function previewModels(connection) {
+  if (accountApiClient) return accountApiClient.post("/api/models/preview", connection);
   return request("/api/models/preview", { method: "POST", body: connection });
 }
 
 export async function saveSettings(settings) {
+  if (accountApiClient) return accountApiClient.put("/api/config", settings);
   if (MODE === "offline") {
     localStorage.setItem(MOCK_SETTINGS_KEY, JSON.stringify(settings));
     return settings;

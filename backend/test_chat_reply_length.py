@@ -7,7 +7,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from backend.auth.types import AuthContext, ConversationAccess, PublicUser
 from backend.routers import chat_routes
+from backend.services.user_ai_settings import EffectiveAIConfig
 
 
 class RecordingClient:
@@ -28,6 +30,18 @@ class ChatReplyLengthTests(unittest.TestCase):
         }
         self.client = RecordingClient()
         self.stop_event = threading.Event()
+        self.access = ConversationAccess(
+            AuthContext(PublicUser(1, "chat-user", "2026-01-01T00:00:00+00:00"), 1),
+            {"id": 7, "owner_user_id": 1},
+        )
+        self.effective_config = EffectiveAIConfig(
+            base_url="https://api.deepseek.com",
+            model="test-model",
+            api_key="test-key",
+            generation={"max_tokens": 777},
+            timeout_seconds=60,
+            ai_enabled=True,
+        )
         self.inspection = SimpleNamespace(
             needs_compression=False,
             messages=[{"role": "system", "content": "base rules"}],
@@ -44,7 +58,6 @@ class ChatReplyLengthTests(unittest.TestCase):
             method=None,
         )
         self.patches = [
-            patch.object(chat_routes, "load_config", return_value=self.config),
             patch.object(
                 chat_routes.context_service,
                 "inspect_context",
@@ -56,22 +69,27 @@ class ChatReplyLengthTests(unittest.TestCase):
                 return_value=self.prepared,
             ),
             patch.object(
-                chat_routes.repositories,
+                chat_routes.conversation_repository,
                 "create_message",
                 return_value={"id": 12},
             ),
             patch.object(
-                chat_routes.repositories,
+                chat_routes.conversation_repository,
                 "update_message",
             ),
             patch.object(
-                chat_routes.repositories,
+                chat_routes.conversation_repository,
                 "get_message",
                 return_value={"metadata": {"status": "done"}},
             ),
             patch.object(chat_routes, "create_client", return_value=self.client),
             patch.object(chat_routes.snapshot_service, "autosave"),
             patch.object(chat_routes, "_state_event", return_value={}),
+            patch.object(
+                chat_routes,
+                "_recover_missing_options",
+                return_value=[],
+            ),
             patch.object(
                 chat_routes.adventure_engine,
                 "parse_visible_options",
@@ -108,9 +126,10 @@ class ChatReplyLengthTests(unittest.TestCase):
     def test_selected_reply_length_is_forwarded_and_added_to_prompt(self):
         list(
             chat_routes._stream_ai_reply(
-                7,
+                self.access,
                 self.stop_event,
                 {"reply_length": "long"},
+                self.effective_config,
             )
         )
 
@@ -118,7 +137,7 @@ class ChatReplyLengthTests(unittest.TestCase):
         self.assertIn("2000", self.client.calls[0]["messages"][0]["content"])
 
     def test_legacy_chat_metadata_keeps_default_client_budget(self):
-        list(chat_routes._stream_ai_reply(7, self.stop_event, {}))
+        list(chat_routes._stream_ai_reply(self.access, self.stop_event, {}, self.effective_config))
 
         self.assertIsNone(self.client.calls[0]["max_tokens"])
 
@@ -139,9 +158,10 @@ class ChatReplyLengthTests(unittest.TestCase):
         with patch.object(chat_routes, "create_client", return_value=client):
             events = list(
                 chat_routes._stream_ai_reply(
-                    7,
+                    self.access,
                     self.stop_event,
                     {"reply_length": "detailed"},
+                    self.effective_config,
                 )
             )
 
@@ -172,9 +192,10 @@ class ChatReplyLengthTests(unittest.TestCase):
         with patch.object(chat_routes, "create_client", return_value=client):
             list(
                 chat_routes._stream_ai_reply(
-                    7,
+                    self.access,
                     self.stop_event,
                     {"reply_length": "detailed"},
+                    self.effective_config,
                 )
             )
 
@@ -195,9 +216,10 @@ class ChatReplyLengthTests(unittest.TestCase):
         with patch.object(chat_routes, "create_client", return_value=client):
             list(
                 chat_routes._stream_ai_reply(
-                    7,
+                    self.access,
                     self.stop_event,
                     {"reply_length": "detailed"},
+                    self.effective_config,
                 )
             )
 
@@ -220,13 +242,14 @@ class ChatReplyLengthTests(unittest.TestCase):
         with patch.object(
             chat_routes, "create_client", return_value=client
         ), patch.object(
-            chat_routes.repositories, "update_message"
+            chat_routes.conversation_repository, "update_message"
         ) as update_message:
             events = list(
                 chat_routes._stream_ai_reply(
-                    7,
+                    self.access,
                     self.stop_event,
                     {"reply_length": "detailed"},
+                    self.effective_config,
                 )
             )
 
@@ -254,9 +277,10 @@ class ChatReplyLengthTests(unittest.TestCase):
         with patch.object(chat_routes, "create_client", return_value=client):
             events = list(
                 chat_routes._stream_ai_reply(
-                    7,
+                    self.access,
                     stop_event,
                     {"reply_length": "detailed"},
+                    self.effective_config,
                 )
             )
 
@@ -266,7 +290,7 @@ class ChatReplyLengthTests(unittest.TestCase):
     def test_stream_chat_passes_client_metadata_to_ai_reply(self):
         metadata = {"reply_length": "short"}
         with patch.object(
-            chat_routes.repositories,
+            chat_routes.conversation_repository,
             "create_message",
             return_value={"id": 20},
         ), patch.object(
@@ -280,14 +304,18 @@ class ChatReplyLengthTests(unittest.TestCase):
         ) as ai_reply:
             list(
                 chat_routes._stream_chat(
-                    7,
+                    self.access,
                     "look around",
                     metadata,
                     self.stop_event,
+                    self.effective_config,
+                    None,
                 )
             )
 
-        ai_reply.assert_called_once_with(7, self.stop_event, metadata)
+        ai_reply.assert_called_once_with(
+            self.access, self.stop_event, metadata, self.effective_config, None
+        )
 
 
 if __name__ == "__main__":

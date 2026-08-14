@@ -1,6 +1,8 @@
 # AI 对话冒险平台
 
-个人单机、单用户的中文 AI 文字冒险应用。后端使用 FastAPI、Uvicorn 和 SQLite，前端是无构建步骤的 HTML/CSS/ES module。配置 DeepSeek 兼容 API 后使用真实流式生成；未配置密钥时使用确定性的 mock 回复，前端在后端不可用时也保留离线演示数据。
+本地优先的多账号中文 AI 文字冒险应用。后端使用 FastAPI、Uvicorn 和 SQLite，前端是无构建步骤的 HTML/CSS/ES module。配置 DeepSeek 兼容 API 后使用真实流式生成；未配置密钥时使用确定性的 mock 回复，前端在后端不可用时也保留离线演示数据。
+
+账号之间严格隔离会话、消息、状态、快照、分支和个人 AI 设置。角色卡、世界书和作品是可发现的公共资源，但只有所有者可以创建、修改和删除；列表和详情会返回 `owner_username` 与 `can_edit`，用于区分可读和可写权限。
 
 ## 当前能力
 
@@ -30,13 +32,25 @@ python start.py --no-browser
 
 ## 本地配置
 
-API 配置可通过应用设置页或环境变量提供：
+账号安全和运行时配置通过环境变量提供；AI 配置也可通过登录后的应用设置页提供：
 
+- `NEKO_DATA_DIR`：SQLite 数据目录，默认是 `data/`
+- `NEKO_AUTH_KEYS`：Fernet 主密钥轮换列表（逗号分隔）；不要写入仓库或日志
+- `NEKO_AUTH_KEY_PATH`：主密钥文件路径，默认位于数据目录
+- `NEKO_COOKIE_SECURE`：HTTPS 部署设为 `true`；本地 HTTP 才使用 `false`
+- `NEKO_PUBLIC_ORIGIN`：浏览器实际访问的固定 origin，例如 `https://adventure.example`
+- `NEKO_TRUSTED_PROXY_CIDRS`：仅填写自有反向代理网段
+- `NEKO_AI_ALLOWED_ORIGINS`：AI provider origin 白名单
+- `NEKO_AI_HTTPS_ONLY`：生产环境建议设为 `true`
 - `DEEPSEEK_API_KEY`
 - `DEEPSEEK_BASE_URL`
 - `DEEPSEEK_MODEL`
 
 本地 `config.json` 可能包含真实密钥，不要读取、复制或提交其秘密值。SQLite 运行数据位于 `data/app.db`，也不应手动编辑或提交。
+
+新实例的第一个注册账号会在事务中认领旧的无主资源，并将旧配置中的明文 API key 加密迁移到该账号；清理未完成时写请求会被拒绝，恢复方式见 [`docs/deployment-account-security.md`](docs/deployment-account-security.md)。请先备份数据目录和主密钥，再做迁移或轮换。不要使用多 worker：会话生成锁和 stop 事件保存在单进程内存中。
+
+浏览器使用 HttpOnly 的 `neko_session` 会话 Cookie 和非 HttpOnly 的 `neko_csrf` 双提交 Cookie。所有写请求都必须带同源 `Origin`/`Referer` 和 `X-CSRF-Token`。局域网 HTTP 仅适合可信开发网络；它不能防止同网段窃听或会话劫持，公开部署必须使用 HTTPS、Secure Cookie 和固定 public origin。
 
 ## 项目结构
 
@@ -81,4 +95,4 @@ node --test $testFiles
 python backend/smoke_test.py
 ```
 
-当前 API 路由和 schema 以 `backend.main.app.openapi()`、`backend/schemas.py`、路由实现及测试为准；`docs/api-contract.md` 只保留流式事件与兼容行为，避免维护一份容易过期的完整 API 副本。
+当前 API 路由和 schema 以 `backend.main.app.openapi()`、`backend/schemas.py`、路由实现及测试为准；[`docs/api-contract.md`](docs/api-contract.md) 记录认证、隔离、SSE 和兼容行为，避免维护一份容易过期的完整 API 副本。

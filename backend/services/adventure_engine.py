@@ -5,6 +5,7 @@ import json
 import re
 
 from .. import repositories
+from ..auth.types import ConversationAccess
 
 STATE_BLOCK_RE = re.compile(
     r"<\s*state_delta\s*>(.*?)<\s*/\s*state_delta\s*>",
@@ -566,36 +567,46 @@ def build_system_prompt(work, cards, worldbook, entries, state, summary):
 
 
 def build_messages(
-    conversation_id,
+    access,
     recent_count=MEMORY_RECENT_COUNT,
     summary_override=None,
     summary_boundary_override=None,
 ):
     """构建发送给 DeepSeek 的完整消息列表。"""
-    conversation = repositories.get_conversation(conversation_id)
+    if not isinstance(access, ConversationAccess):
+        raise TypeError("build_messages requires ConversationAccess")
+    conversation_id = access.conversation["id"]
+    user_id = access.auth.user.id
+    conversation = access.conversation
     if conversation is None:
         raise ValueError("会话不存在")
     work = (
-        repositories.get_work(conversation["work_id"])
+        repositories.get_work(
+            conversation["work_id"], viewer_user_id=user_id
+        )
         if conversation.get("work_id")
         else None
     )
     cards = repositories.get_conversation_cards(conversation)
     worldbook = (
-        repositories.get_worldbook(conversation["worldbook_id"])
+        repositories.get_worldbook(
+            conversation["worldbook_id"], viewer_user_id=user_id
+        )
         if conversation.get("worldbook_id")
         else None
     )
-    state = repositories.get_state(conversation_id)
+    state = repositories.get_state(conversation_id, user_id=user_id)
     recent_window = (
         MEMORY_RECENT_COUNT
         if recent_count is None
         else max(int(recent_count), 1)
     )
-    history = repositories.get_messages(conversation_id)
+    history = repositories.get_messages(conversation_id, user_id)
     covered_until_sequence = -1
     if summary_override is None:
-        summary_record = repositories.get_memory_summary_record(conversation_id)
+        summary_record = repositories.get_memory_summary_record(
+            conversation_id, user_id
+        )
         summary = (summary_record or {}).get("summary", "")
         covered_until_sequence = int(
             (summary_record or {}).get("covered_until_sequence", -1)
@@ -605,7 +616,9 @@ def build_messages(
         if summary_boundary_override is not None:
             covered_until_sequence = int(summary_boundary_override)
         elif summary:
-            summary_record = repositories.get_memory_summary_record(conversation_id)
+            summary_record = repositories.get_memory_summary_record(
+                conversation_id, user_id
+            )
             covered_until_sequence = int(
                 (summary_record or {}).get("covered_until_sequence", -1)
             )
@@ -681,18 +694,24 @@ def build_local_memory_summary(messages, keep_recent, max_chars):
 
 
 def update_memory_summary(
-    conversation_id,
+    access,
     keep_recent=MEMORY_RECENT_COUNT,
     max_chars=1200,
     messages=None,
 ):
     """把超出最近窗口的旧消息压缩成长期记忆摘要。"""
+    if not isinstance(access, ConversationAccess):
+        raise TypeError("update_memory_summary requires ConversationAccess")
+    conversation_id = access.conversation["id"]
+    user_id = access.auth.user.id
     if messages is None:
-        messages = repositories.get_messages(conversation_id)
+        messages = repositories.get_messages(conversation_id, user_id)
     summary, _ = build_local_memory_summary(
         messages,
         keep_recent=keep_recent,
         max_chars=max_chars,
     )
-    repositories.save_memory_summary(conversation_id, summary)
+    repositories.save_memory_summary(
+        conversation_id, summary, user_id=user_id
+    )
     return summary

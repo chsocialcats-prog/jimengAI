@@ -1,6 +1,7 @@
 from contextlib import closing
 
 from .. import database
+from ..auth.types import ConversationAccess
 from .cards import get_card, row_to_card
 from .normalizers import normalize_state, validate_onboarding
 from .works import get_work
@@ -32,11 +33,22 @@ def row_to_conversation(row):
     return data
 
 
-def get_conversation(conversation_id):
+def get_conversation(conversation_id, user_id):
     """按主键读取冒险会话。"""
     return row_to_conversation(
-        database.fetch_one("SELECT * FROM conversations WHERE id = ?", (conversation_id,))
+        database.fetch_one(
+            "SELECT * FROM conversations WHERE id = ? AND user_id = ?",
+            (conversation_id, user_id),
+        )
     )
+
+
+def require_conversation_owner(conversation_id, auth):
+    """Resolve an owned conversation without revealing cross-account existence."""
+    conversation = get_conversation(conversation_id, auth.user.id)
+    if conversation is None:
+        return None
+    return ConversationAccess(auth=auth, conversation=conversation)
 
 
 def get_conversation_card(conversation):
@@ -73,13 +85,13 @@ def get_conversation_cards(conversation):
     return [_json_safe_copy(card, {})] if card else []
 
 
-def list_conversations(work_id=None, page=1, page_size=20):
+def list_conversations(user_id, work_id=None, page=1, page_size=20):
     """分页读取会话，可按作品过滤。"""
-    where = ""
-    params = []
+    where = "WHERE user_id = ?"
+    params = [user_id]
     if work_id is not None:
-        where = "WHERE work_id = ?"
-        params = [work_id]
+        where += " AND work_id = ?"
+        params.append(work_id)
     total = database.fetch_one(
         f"SELECT COUNT(*) AS total FROM conversations {where}", params
     )["total"]
@@ -130,7 +142,7 @@ def _ordered_work_cards_in_connection(connection, work_id, legacy_card_id=None):
     return card_ids, cards
 
 
-def create_conversation(work_id, title, *, connect_fn=database.connect):
+def create_conversation(work_id, title, user_id, *, connect_fn=database.connect):
     """根据作品创建会话，并初始化状态、开场消息和记忆摘要。"""
     onboarding_status = "pending"
     now = database.now_str()
@@ -159,12 +171,12 @@ def create_conversation(work_id, title, *, connect_fn=database.connect):
         cursor = connection.execute(
             """
             INSERT INTO conversations (
-                work_id, card_id, worldbook_id, title, status,
+                user_id, work_id, card_id, worldbook_id, title, status,
                 current_state, card_snapshot, card_snapshots, onboarding_status, onboarding_config, onboarding_answers, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                work_id,
+                user_id, work_id,
                 card_ids[0] if card_ids else None,
                 work.get("worldbook_id"),
                 title,
@@ -233,74 +245,110 @@ def create_conversation(work_id, title, *, connect_fn=database.connect):
                 (now, conversation_id),
             )
         connection.commit()
-    return get_conversation(conversation_id)
+    return get_conversation(conversation_id, user_id)
 
 
 def create_conversation_branch(
-    source_conversation_id, title, branch_label="", *, connect_fn=database.connect
+    source_conversation_id, user_id, title, branch_label="", snapshot_id=None,
+    *, connect_fn=database.connect,
 ):
     """Create a branch with its source's frozen cards and current player state."""
-    source = get_conversation(source_conversation_id)
-    if source is None:
-        return None
-    state = normalize_state(get_state(source_conversation_id, connect_fn=connect_fn))
-    card_snapshots = _json_safe_copy(get_conversation_cards(source), [])
-    card_snapshot = (
-        card_snapshots[0]
-        if card_snapshots
-        else _EMPTY_CARD_SNAPSHOT_MARKER
-        if getattr(source, "_card_snapshots_authoritative", False)
-        else {}
-    )
-    card_id = card_snapshot.get("id") if isinstance(card_snapshot, dict) else None
-    if card_id is None:
-        card_id = source.get("card_id")
     now = database.now_str()
     with closing(connect_fn()) as connection:
         connection.execute("BEGIN IMMEDIATE")
+        source_row = connection.execute(
+            "SELECT * FROM conversations WHERE id = ? AND user_id = ?",
+            (source_conversation_id, user_id),
+        ).fetchone()
+        if source_row is None:
+            connection.rollback()
+            return None
+        source = row_to_conversation(source_row)
+        if snapshot_id is None:
+            state = normalize_state(_get_state_in_connection(connection, source_conversation_id) or {})
+            messages = _get_messages_in_connection(connection, source_conversation_id)
+            memory = _get_memory_summary_record_in_connection(connection, source_conversation_id)
+            persona_corrections = source.get("persona_corrections") or []
+            memory_corrections = source.get("memory_corrections") or []
+        else:
+            snapshot_row = connection.execute(
+                "SELECT snapshots.* FROM snapshots JOIN conversations "
+                "ON conversations.id = snapshots.conversation_id "
+                "WHERE snapshots.id = ? AND snapshots.conversation_id = ? "
+                "AND conversations.user_id = ?",
+                (snapshot_id, source_conversation_id, user_id),
+            ).fetchone()
+            if snapshot_row is None:
+                connection.rollback()
+                return None
+            snapshot = database.json_loads(snapshot_row["state"], {})
+            state = normalize_state(snapshot)
+            messages = database.json_loads(snapshot_row["messages"], [])
+            memory = {
+                "summary": snapshot_row["memory_summary"],
+                "covered_until_sequence": snapshot_row["memory_summary_covered_until_sequence"],
+            }
+            persona_corrections = database.json_loads(snapshot_row["persona_corrections"], [])
+            memory_corrections = database.json_loads(snapshot_row["memory_corrections"], [])
+        card_snapshots = _json_safe_copy(get_conversation_cards(source), [])
+        card_snapshot = card_snapshots[0] if card_snapshots else _EMPTY_CARD_SNAPSHOT_MARKER
+        card_id = card_snapshot.get("id") if isinstance(card_snapshot, dict) else source.get("card_id")
         cursor = connection.execute(
             """
             INSERT INTO conversations (
-                work_id, card_id, worldbook_id, title, status, current_state,
+                user_id, work_id, card_id, worldbook_id, title, status, current_state,
                 card_snapshot, card_snapshots, parent_conversation_id, branch_label,
                 onboarding_status, onboarding_config, onboarding_answers,
                 persona_corrections, memory_corrections, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                source.get("work_id"), card_id, source.get("worldbook_id"), title,
+                user_id, source.get("work_id"), card_id, source.get("worldbook_id"), title,
                 "active", database.json_dumps(state), database.json_dumps(card_snapshot),
                 database.json_dumps(card_snapshots), source_conversation_id, branch_label,
                 source.get("onboarding_status", "completed"),
                 database.json_dumps(source.get("onboarding_config") or {}),
                 database.json_dumps(source.get("onboarding_answers") or {}),
-                database.json_dumps(source.get("persona_corrections") or []),
-                database.json_dumps(source.get("memory_corrections") or []), now, now,
+                database.json_dumps(persona_corrections or []),
+                database.json_dumps(memory_corrections or []), now, now,
             ),
         )
         conversation_id = cursor.lastrowid
         _save_state_row_in_connection(connection, conversation_id, state, now)
         connection.execute(
-            "INSERT INTO memory_summaries (conversation_id, summary, updated_at) VALUES (?, '', ?)",
-            (conversation_id, now),
+            "INSERT INTO memory_summaries (conversation_id, summary, covered_until_sequence, updated_at) VALUES (?, ?, ?, ?)",
+            (conversation_id, memory["summary"], memory["covered_until_sequence"], now),
         )
+        _replace_messages_in_connection(connection, conversation_id, messages, now)
         connection.commit()
-    return get_conversation(conversation_id)
+    return get_conversation(conversation_id, user_id)
 
 
-def update_conversation(conversation_id, data):
+def update_conversation(conversation_id, user_id, data):
     """更新会话标题。"""
     database.execute(
-        "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
-        (data["title"], database.now_str(), conversation_id),
+        "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+        (data["title"], database.now_str(), conversation_id, user_id),
     )
-    return get_conversation(conversation_id)
+    return get_conversation(conversation_id, user_id)
+
+
+def set_conversation_status(conversation_id, user_id, status):
+    """Archive or restore only a conversation owned by the current user."""
+    if status not in ("active", "archived"):
+        raise ValueError("会话状态无效")
+    database.execute(
+        "UPDATE conversations SET status = ?, updated_at = ? "
+        "WHERE id = ? AND user_id = ?",
+        (status, database.now_str(), conversation_id, user_id),
+    )
+    return get_conversation(conversation_id, user_id)
 
 
 def complete_conversation_onboarding(
-    conversation_id, answers, *, connect_fn=database.connect
+    conversation_id, user_id, answers, *, connect_fn=database.connect
 ):
-    conversation = get_conversation(conversation_id)
+    conversation = get_conversation(conversation_id, user_id)
     if conversation is None: return None
     accepted, config = {}, conversation["onboarding_config"]
     fields = config.get("fields", []) or [{"key": key, "required": False} for key in ("name", "age", "identity", "preference", "boundary")]
@@ -314,7 +362,7 @@ def complete_conversation_onboarding(
         value = str(value).strip()
         if key != "freeform" and value:
             accepted[str(key)[:80]] = value
-    database.execute("UPDATE conversations SET onboarding_status = 'completed', onboarding_answers = ?, updated_at = ? WHERE id = ?", (database.json_dumps(accepted), database.now_str(), conversation_id))
+    database.execute("UPDATE conversations SET onboarding_status = 'completed', onboarding_answers = ?, updated_at = ? WHERE id = ? AND user_id = ?", (database.json_dumps(accepted), database.now_str(), conversation_id, user_id))
     work = get_work(conversation.get("work_id")) if conversation.get("work_id") else None
     card = get_conversation_card(conversation)
     worldbook = get_worldbook(conversation.get("worldbook_id")) if conversation.get("worldbook_id") else None
@@ -325,25 +373,25 @@ def complete_conversation_onboarding(
         lines += ["", "📖 世界与关键记忆", worldbook["description"]]
     if accepted:
         lines += ["", "🧭 本次会话设定"] + [f"- {key}：{value}" for key, value in accepted.items()]
-    create_message(conversation_id, "assistant", "\n".join(item for item in lines if item is not None), metadata={"kind": "onboarding_confirmed"}, connect_fn=connect_fn)
-    return get_conversation(conversation_id)
+    create_message(conversation_id, user_id, "assistant", "\n".join(item for item in lines if item is not None), metadata={"kind": "onboarding_confirmed"}, connect_fn=connect_fn)
+    return get_conversation(conversation_id, user_id)
 
 
-def add_conversation_correction(conversation_id, kind, content):
+def add_conversation_correction(conversation_id, user_id, kind, content):
     if kind not in ("persona", "memory"): raise ValueError("修正类型无效")
     content = str(content or "").strip()
     if not content: raise ValueError("修正内容不能为空")
-    conversation = get_conversation(conversation_id)
+    conversation = get_conversation(conversation_id, user_id)
     if conversation is None: return None
     field = "persona_corrections" if kind == "persona" else "memory_corrections"
     entries = list(conversation.get(field) or []) + [{"content": content, "created_at": database.now_str()}]
-    database.execute(f"UPDATE conversations SET {field} = ?, updated_at = ? WHERE id = ?", (database.json_dumps(entries[-50:]), database.now_str(), conversation_id))
-    return get_conversation(conversation_id)
+    database.execute(f"UPDATE conversations SET {field} = ?, updated_at = ? WHERE id = ? AND user_id = ?", (database.json_dumps(entries[-50:]), database.now_str(), conversation_id, user_id))
+    return get_conversation(conversation_id, user_id)
 
 
-def delete_conversation(conversation_id):
+def delete_conversation(conversation_id, user_id):
     """删除会话及其消息、状态、存档和记忆。"""
-    database.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+    database.execute("DELETE FROM conversations WHERE id = ? AND user_id = ?", (conversation_id, user_id))
 
 
 def row_to_message(row):
@@ -356,10 +404,15 @@ def row_to_message(row):
     return data
 
 
-def get_message(message_id):
+def get_message(message_id, user_id):
     """按主键读取消息。"""
     return row_to_message(
-        database.fetch_one("SELECT * FROM messages WHERE id = ?", (message_id,))
+        database.fetch_one(
+            "SELECT messages.* FROM messages JOIN conversations "
+            "ON conversations.id = messages.conversation_id "
+            "WHERE messages.id = ? AND conversations.user_id = ?",
+            (message_id, user_id),
+        )
     )
 
 
@@ -371,11 +424,14 @@ def _get_messages_in_connection(connection, conversation_id):
     return [row_to_message(row) for row in rows]
 
 
-def get_messages(conversation_id, limit=None):
+def get_messages(conversation_id, user_id, limit=None):
     """读取会话消息，默认按 sequence 升序；limit 表示只取最近 N 条。"""
     rows = database.fetch_all(
-        "SELECT * FROM messages WHERE conversation_id = ? ORDER BY sequence ASC",
-        (conversation_id,),
+        "SELECT messages.* FROM messages JOIN conversations "
+        "ON conversations.id = messages.conversation_id "
+        "WHERE messages.conversation_id = ? AND conversations.user_id = ? "
+        "ORDER BY messages.sequence ASC",
+        (conversation_id, user_id),
     )
     messages = [row_to_message(row) for row in rows]
     if limit is not None and len(messages) > limit:
@@ -384,7 +440,7 @@ def get_messages(conversation_id, limit=None):
 
 
 def create_message(
-    conversation_id, role, content, metadata=None, token_count=0, *,
+    conversation_id, user_id, role, content, metadata=None, token_count=0, *,
     connect_fn=database.connect,
 ):
     """新增消息，sequence 自动递增，并刷新会话时间。"""
@@ -393,6 +449,12 @@ def create_message(
         # MAX(sequence) 与 INSERT 必须在同一个写事务内完成。否则两个流式请求
         # 可能读到相同的下一个序号；数据库唯一约束是额外的最后一道保护。
         connection.execute("BEGIN IMMEDIATE")
+        if connection.execute(
+            "SELECT 1 FROM conversations WHERE id = ? AND user_id = ?",
+            (conversation_id, user_id),
+        ).fetchone() is None:
+            connection.rollback()
+            return None
         row = connection.execute(
             "SELECT COALESCE(MAX(sequence), -1) + 1 AS next_seq "
             "FROM messages WHERE conversation_id = ?",
@@ -423,10 +485,10 @@ def create_message(
         )
         connection.commit()
         message_id = cursor.lastrowid
-    return get_message(message_id)
+    return get_message(message_id, user_id)
 
 
-def update_message(message_id, content=None, metadata=None, token_count=None):
+def update_message(message_id, user_id, content=None, metadata=None, token_count=None):
     """更新消息内容或元数据，用于流式回复完成后回填。"""
     assignments = []
     params = []
@@ -440,12 +502,13 @@ def update_message(message_id, content=None, metadata=None, token_count=None):
         assignments.append("token_count = ?")
         params.append(int(token_count))
     if assignments:
-        params.append(message_id)
+        params.extend([message_id, user_id])
         database.execute(
-            f"UPDATE messages SET {', '.join(assignments)} WHERE id = ?",
+            f"UPDATE messages SET {', '.join(assignments)} WHERE id = ? "
+            "AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ?)",
             params,
         )
-    return get_message(message_id)
+    return get_message(message_id, user_id)
 
 
 def _replace_messages_in_connection(connection, conversation_id, messages, now):
@@ -470,10 +533,15 @@ def _replace_messages_in_connection(connection, conversation_id, messages, now):
         )
 
 
-def replace_messages(conversation_id, messages, *, connect_fn=database.connect):
+def replace_messages(conversation_id, user_id, messages, *, connect_fn=database.connect):
     """读档时用快照里的消息整体替换当前消息。"""
     now = database.now_str()
     with closing(connect_fn()) as connection:
+        if connection.execute(
+            "SELECT 1 FROM conversations WHERE id = ? AND user_id = ?",
+            (conversation_id, user_id),
+        ).fetchone() is None:
+            return None
         _replace_messages_in_connection(connection, conversation_id, messages, now)
         connection.commit()
 
@@ -507,13 +575,20 @@ def _get_state_in_connection(connection, conversation_id):
     return _state_from_row(row, conversation_id)
 
 
-def get_state(conversation_id, *, connect_fn=database.connect):
+def get_state(conversation_id, user_id, *, connect_fn=database.connect):
     """读取会话实时状态；缺失时创建默认状态。"""
-    row = database.fetch_one("SELECT * FROM states WHERE conversation_id = ?", (conversation_id,))
+    row = database.fetch_one(
+        "SELECT states.* FROM states JOIN conversations "
+        "ON conversations.id = states.conversation_id "
+        "WHERE states.conversation_id = ? AND conversations.user_id = ?",
+        (conversation_id, user_id),
+    )
     if row is None:
+        if get_conversation(conversation_id, user_id) is None:
+            return None
         default = normalize_state({})
-        save_state(conversation_id, default, connect_fn=connect_fn)
-        return get_state(conversation_id, connect_fn=connect_fn)
+        save_state(conversation_id, user_id, default, connect_fn=connect_fn)
+        return get_state(conversation_id, user_id, connect_fn=connect_fn)
     return _state_from_row(row, conversation_id)
 
 
@@ -578,14 +653,19 @@ def _save_state_in_connection(
     return normalized
 
 
-def save_state(conversation_id, state, *, connect_fn=database.connect):
+def save_state(conversation_id, user_id, state, *, connect_fn=database.connect):
     """保存实时状态，并同步到会话的 current_state 字段。"""
     normalized = normalize_state(state)
     now = database.now_str()
     with closing(connect_fn()) as connection:
+        if connection.execute(
+            "SELECT 1 FROM conversations WHERE id = ? AND user_id = ?",
+            (conversation_id, user_id),
+        ).fetchone() is None:
+            return None
         _save_state_in_connection(connection, conversation_id, normalized, now)
         connection.commit()
-    return get_state(conversation_id, connect_fn=connect_fn)
+    return get_state(conversation_id, user_id, connect_fn=connect_fn)
 
 
 def _get_memory_summary_record_in_connection(connection, conversation_id):
@@ -603,12 +683,13 @@ def _get_memory_summary_record_in_connection(connection, conversation_id):
     }
 
 
-def get_memory_summary_record(conversation_id):
+def get_memory_summary_record(conversation_id, user_id):
     """读取会话长期记忆摘要。"""
     row = database.fetch_one(
-        "SELECT summary, covered_until_sequence, updated_at "
-        "FROM memory_summaries WHERE conversation_id = ?",
-        (conversation_id,),
+        "SELECT memory_summaries.summary, memory_summaries.covered_until_sequence, memory_summaries.updated_at "
+        "FROM memory_summaries JOIN conversations ON conversations.id = memory_summaries.conversation_id "
+        "WHERE memory_summaries.conversation_id = ? AND conversations.user_id = ?",
+        (conversation_id, user_id),
     )
     if row is None:
         return {"summary": "", "covered_until_sequence": -1, "updated_at": None}
@@ -619,8 +700,8 @@ def get_memory_summary_record(conversation_id):
     }
 
 
-def get_memory_summary(conversation_id):
-    return get_memory_summary_record(conversation_id)["summary"]
+def get_memory_summary(conversation_id, user_id):
+    return get_memory_summary_record(conversation_id, user_id)["summary"]
 
 
 def _save_memory_summary_in_connection(
@@ -641,12 +722,17 @@ def _save_memory_summary_in_connection(
 
 
 def save_memory_summary(
-    conversation_id, summary, covered_until_sequence=-1, *,
+    conversation_id, user_id, summary, covered_until_sequence=-1, *,
     connect_fn=database.connect,
 ):
     """写入会话长期记忆摘要。"""
     now = database.now_str()
     with closing(connect_fn()) as connection:
+        if connection.execute(
+            "SELECT 1 FROM conversations WHERE id = ? AND user_id = ?",
+            (conversation_id, user_id),
+        ).fetchone() is None:
+            return None
         _save_memory_summary_in_connection(
             connection, conversation_id, summary, covered_until_sequence, now
         )

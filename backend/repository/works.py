@@ -1,6 +1,7 @@
 from contextlib import closing
 
 from .. import database
+from ..api_models.shared import project_shared_resource
 from .cards import get_card
 from .normalizers import (
     clean_update_data,
@@ -42,7 +43,7 @@ def normalize_player_attributes(data, *, for_update=False):
     return attributes
 
 
-def ordered_work_cards(work_id, legacy_card_id=None):
+def ordered_work_cards(work_id, legacy_card_id=None, viewer_user_id=None):
     rows = database.fetch_all(
         "SELECT card_id FROM work_cards WHERE work_id = ? ORDER BY position ASC",
         (work_id,),
@@ -51,7 +52,7 @@ def ordered_work_cards(work_id, legacy_card_id=None):
     if not card_ids and legacy_card_id is not None:
         card_ids = [legacy_card_id]
     return card_ids, [
-        card for card_id in card_ids if (card := get_card(card_id)) is not None
+        card for card_id in card_ids if (card := get_card(card_id, viewer_user_id=viewer_user_id)) is not None
     ]
 
 
@@ -80,7 +81,7 @@ def replace_work_cards(connection, work_id, card_ids):
     )
 
 
-def row_to_work(row):
+def row_to_work(row, viewer_user_id=None):
     """把作品数据库行转为接口字典。"""
     if row is None:
         return None
@@ -98,45 +99,50 @@ def row_to_work(row):
         player_attributes if isinstance(player_attributes, dict) else {}
     )
     data["card_ids"], data["cards"] = ordered_work_cards(
-        data["id"], data.get("card_id")
+        data["id"], data.get("card_id"), viewer_user_id
     )
     data["card_id"] = data["card_ids"][0] if data["card_ids"] else None
     data["card"] = data["cards"][0] if data["cards"] else None
     data["is_archive"] = bool(data.get("is_archive"))
-    return data
+    return project_shared_resource(data, viewer_user_id)
 
 
-def list_works(q="", tag="", page=1, page_size=20):
+def list_works(q="", tag="", page=1, page_size=20, *, viewer_user_id=None):
     """按标题、简介或标签搜索作品。"""
     where = []
     params = []
     if q:
-        where.append("(title LIKE ? OR description LIKE ?)")
+        where.append("(works.title LIKE ? OR works.description LIKE ?)")
         like = f"%{q}%"
         params.extend([like, like])
     if tag:
-        where.append("tags LIKE ?")
+        where.append("works.tags LIKE ?")
         params.append(f'%"{tag}"%')
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
     total = database.fetch_one(
         f"SELECT COUNT(*) AS total FROM works {where_sql}", params
     )["total"]
     rows = database.fetch_all(
-        f"SELECT * FROM works {where_sql} ORDER BY updated_at DESC, id DESC "
+        f"SELECT works.*, users.username AS owner_username FROM works "
+        f"LEFT JOIN users ON users.id = works.owner_user_id {where_sql} "
+        "ORDER BY works.updated_at DESC, works.id DESC "
         "LIMIT ? OFFSET ?",
         params + [page_size, (page - 1) * page_size],
     )
     return {
-        "items": [row_to_work(row) for row in rows],
+        "items": [row_to_work(row, viewer_user_id) for row in rows],
         "total": total,
         "page": page,
         "page_size": page_size,
     }
 
 
-def get_work(work_id):
+def get_work(work_id, *, viewer_user_id=None):
     """按主键读取作品。"""
-    return row_to_work(database.fetch_one("SELECT * FROM works WHERE id = ?", (work_id,)))
+    return row_to_work(database.fetch_one(
+        "SELECT works.*, users.username AS owner_username FROM works "
+        "LEFT JOIN users ON users.id = works.owner_user_id WHERE works.id = ?", (work_id,)
+    ), viewer_user_id)
 
 
 _WORLD_BOOK_ID_UNSET = object()
@@ -157,7 +163,7 @@ def _normalize_work_create_fields(data):
 
 
 def _insert_work_in_connection(
-    connection, data, *, now=None, worldbook_id=_WORLD_BOOK_ID_UNSET
+    connection, data, *, owner_user_id, now=None, worldbook_id=_WORLD_BOOK_ID_UNSET
 ):
     """Insert a work while the caller owns the surrounding transaction."""
     now = now or database.now_str()
@@ -171,12 +177,12 @@ def _insert_work_in_connection(
     work_id = connection.execute(
         """
         INSERT INTO works (
-            title, description, card_id, player_attributes, worldbook_id, opening, tags, onboarding,
+            owner_user_id, title, description, card_id, player_attributes, worldbook_id, opening, tags, onboarding,
             cover_url, reply_templates, active_reply_template_id, is_archive, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            data.get("title", ""), data.get("description", ""), None,
+            owner_user_id, data.get("title", ""), data.get("description", ""), None,
             database.json_dumps(normalized["player_attributes"]), resolved_worldbook_id,
             data.get("opening", ""), database.json_dumps(data.get("tags", [])),
             database.json_dumps(validate_onboarding(data.get("onboarding", {}))),
@@ -218,13 +224,13 @@ def _normalize_work_update_fields(data, current_row, extra_fields=None):
 
 
 def _update_work_in_connection(
-    connection, work_id, data, *, now=None, current_row=None, extra_fields=None
+    connection, work_id, data, *, owner_user_id, now=None, current_row=None, extra_fields=None
 ):
     """Update a work while the caller owns the surrounding transaction."""
     now = now or database.now_str()
     if current_row is None:
         current_row = connection.execute(
-            "SELECT * FROM works WHERE id = ?", (work_id,)
+            "SELECT * FROM works WHERE id = ? AND owner_user_id = ?", (work_id, owner_user_id)
         ).fetchone()
     if current_row is None:
         return None
@@ -258,36 +264,36 @@ def _update_work_in_connection(
     if not assignments and card_ids is None:
         return False
     assignments.append("updated_at = ?")
-    params.extend([now, work_id])
+    params.extend([now, work_id, owner_user_id])
     if card_ids is not None:
         validate_card_ids(connection, card_ids)
     connection.execute(
-        f"UPDATE works SET {', '.join(assignments)} WHERE id = ?", params
+        f"UPDATE works SET {', '.join(assignments)} WHERE id = ? AND owner_user_id = ?", params
     )
     if card_ids is not None:
         replace_work_cards(connection, work_id, card_ids)
     return True
 
 
-def create_work(data, *, connect_fn=database.connect):
+def create_work(data, *, owner_user_id, connect_fn=database.connect):
     """新增作品。"""
     with closing(connect_fn()) as connection:
         try:
             connection.execute("BEGIN IMMEDIATE")
-            work_id = _insert_work_in_connection(connection, data)
+            work_id = _insert_work_in_connection(connection, data, owner_user_id=owner_user_id)
             connection.commit()
         except Exception:
             connection.rollback()
             raise
-    return get_work(work_id)
+    return get_work(work_id, viewer_user_id=owner_user_id)
 
 
-def update_work(work_id, data, *, connect_fn=database.connect):
+def update_work(work_id, data, *, owner_user_id, connect_fn=database.connect):
     """更新作品。"""
     with closing(connect_fn()) as connection:
         try:
             connection.execute("BEGIN IMMEDIATE")
-            changed = _update_work_in_connection(connection, work_id, data)
+            changed = _update_work_in_connection(connection, work_id, data, owner_user_id=owner_user_id)
             if changed is False:
                 connection.rollback()
             else:
@@ -295,8 +301,8 @@ def update_work(work_id, data, *, connect_fn=database.connect):
         except Exception:
             connection.rollback()
             raise
-    return get_work(work_id)
+    return get_work(work_id, viewer_user_id=owner_user_id)
 
-def delete_work(work_id):
+def delete_work(work_id, *, owner_user_id):
     """删除作品。"""
-    database.execute("DELETE FROM works WHERE id = ?", (work_id,))
+    database.execute("DELETE FROM works WHERE id = ? AND owner_user_id = ?", (work_id, owner_user_id))

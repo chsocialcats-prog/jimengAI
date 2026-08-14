@@ -10,21 +10,21 @@ from backend.test_helpers import IsolatedDatabaseTestCase
 class ContextPersistenceTests(IsolatedDatabaseTestCase):
     def setUp(self):
         super().setUp()
-        self.work = repositories.create_work({"title": "测试剧本", "opening": "开场"})
-        self.conversation = repositories.create_conversation(self.work["id"], "测试会话")
+        self.work = repositories.create_work({"title": "测试剧本", "opening": "开场"}, owner_user_id=self.test_user.id)
+        self.conversation = repositories.create_conversation(self.work["id"], "测试会话", user_id=self.test_user.id)
 
     def tearDown(self):
         super().tearDown()
 
     def test_summary_round_trip_preserves_coverage_and_compatibility(self):
-        repositories.save_memory_summary(self.conversation["id"], "old events", 4)
+        repositories.save_memory_summary(self.conversation["id"], "old events", 4, user_id=self.test_user.id)
 
-        record = repositories.get_memory_summary_record(self.conversation["id"])
+        record = repositories.get_memory_summary_record(self.conversation["id"], self.test_user.id)
 
         self.assertEqual(record["summary"], "old events")
         self.assertEqual(record["covered_until_sequence"], 4)
         self.assertTrue(record["updated_at"])
-        self.assertEqual(repositories.get_memory_summary(self.conversation["id"]), "old events")
+        self.assertEqual(repositories.get_memory_summary(self.conversation["id"], self.test_user.id), "old events")
 
     def test_fresh_conversation_has_empty_summary_and_default_boundary(self):
         with closing(database.connect()) as connection:
@@ -33,12 +33,12 @@ class ContextPersistenceTests(IsolatedDatabaseTestCase):
                 (self.conversation["id"],),
             )
             connection.commit()
-        record = repositories.get_memory_summary_record(self.conversation["id"])
+        record = repositories.get_memory_summary_record(self.conversation["id"], self.test_user.id)
 
         self.assertEqual(record["summary"], "")
         self.assertEqual(record["covered_until_sequence"], -1)
         self.assertIsNone(record["updated_at"])
-        self.assertEqual(repositories.get_memory_summary(self.conversation["id"]), "")
+        self.assertEqual(repositories.get_memory_summary(self.conversation["id"], self.test_user.id), "")
 
     def test_init_db_migrates_legacy_summary_and_snapshot_columns_without_data_loss(self):
         conversation_id = self.conversation["id"]
@@ -88,8 +88,8 @@ class ContextPersistenceTests(IsolatedDatabaseTestCase):
 
         database.init_db()
 
-        record = repositories.get_memory_summary_record(conversation_id)
-        snapshot = repositories.get_snapshot(1, include_private=True)
+        record = repositories.get_memory_summary_record(conversation_id, self.test_user.id)
+        snapshot = repositories.get_snapshot(1, self.test_user.id, include_private=True)
         self.assertEqual(record["summary"], "legacy memory")
         self.assertEqual(record["covered_until_sequence"], -1)
         self.assertEqual(snapshot["memory_summary"], "legacy memory")
@@ -97,26 +97,26 @@ class ContextPersistenceTests(IsolatedDatabaseTestCase):
 
     def test_private_snapshot_captures_boundary_and_public_results_hide_private_data(self):
         conversation_id = self.conversation["id"]
-        repositories.create_message(conversation_id, "user", "private message")
-        repositories.save_memory_summary(conversation_id, "manual summary", 3)
-        manual = repositories.create_snapshot(conversation_id, name="manual")
+        repositories.create_message(conversation_id, "user", "private message", user_id=self.test_user.id)
+        repositories.save_memory_summary(conversation_id, "manual summary", 3, user_id=self.test_user.id)
+        manual = repositories.create_snapshot(conversation_id, name="manual", user_id=self.test_user.id)
 
-        private_manual = repositories.get_snapshot(manual["id"], include_private=True)
+        private_manual = repositories.get_snapshot(manual["id"], self.test_user.id, include_private=True)
         self.assertIn("private message", [message["content"] for message in private_manual["messages"]])
         self.assertEqual(private_manual["memory_summary"], "manual summary")
         self.assertEqual(private_manual["memory_summary_covered_until_sequence"], 3)
 
-        repositories.save_memory_summary(conversation_id, "autosave one", 4)
-        first_auto = repositories.create_snapshot(conversation_id, autosave=True)
-        repositories.save_memory_summary(conversation_id, "autosave two", 8)
-        second_auto = repositories.create_snapshot(conversation_id, autosave=True)
-        private_auto = repositories.get_snapshot(second_auto["id"], include_private=True)
+        repositories.save_memory_summary(conversation_id, "autosave one", 4, user_id=self.test_user.id)
+        first_auto = repositories.create_snapshot(conversation_id, autosave=True, user_id=self.test_user.id)
+        repositories.save_memory_summary(conversation_id, "autosave two", 8, user_id=self.test_user.id)
+        second_auto = repositories.create_snapshot(conversation_id, autosave=True, user_id=self.test_user.id)
+        private_auto = repositories.get_snapshot(second_auto["id"], self.test_user.id, include_private=True)
         self.assertEqual(second_auto["id"], first_auto["id"])
         self.assertEqual(private_auto["memory_summary"], "autosave two")
         self.assertEqual(private_auto["memory_summary_covered_until_sequence"], 8)
 
-        public_items = repositories.list_snapshots(conversation_id)
-        public_get = repositories.get_snapshot(manual["id"])
+        public_items = repositories.list_snapshots(conversation_id, self.test_user.id)
+        public_get = repositories.get_snapshot(manual["id"], self.test_user.id)
         for public_snapshot in public_items + [public_get]:
             self.assertNotIn("messages", public_snapshot)
             self.assertNotIn("memory_summary", public_snapshot)
@@ -124,37 +124,37 @@ class ContextPersistenceTests(IsolatedDatabaseTestCase):
 
     def test_restore_restores_messages_state_summary_and_boundary(self):
         conversation_id = self.conversation["id"]
-        repositories.save_state(conversation_id, {"money": 10, "flags": ["before"]})
-        repositories.create_message(conversation_id, "user", "before message")
-        repositories.save_memory_summary(conversation_id, "before summary", 2)
-        messages_at_snapshot = repositories.get_messages(conversation_id)
-        snapshot = repositories.create_snapshot(conversation_id, name="branch")
+        repositories.save_state(conversation_id, {"money": 10, "flags": ["before"]}, user_id=self.test_user.id)
+        repositories.create_message(conversation_id, "user", "before message", user_id=self.test_user.id)
+        repositories.save_memory_summary(conversation_id, "before summary", 2, user_id=self.test_user.id)
+        messages_at_snapshot = repositories.get_messages(conversation_id, self.test_user.id)
+        snapshot = repositories.create_snapshot(conversation_id, name="branch", user_id=self.test_user.id)
 
-        repositories.save_state(conversation_id, {"money": 99, "flags": ["after"]})
-        repositories.create_message(conversation_id, "assistant", "after message")
-        repositories.save_memory_summary(conversation_id, "after summary", 7)
-        repositories.restore_snapshot(conversation_id, snapshot["id"])
+        repositories.save_state(conversation_id, {"money": 99, "flags": ["after"]}, user_id=self.test_user.id)
+        repositories.create_message(conversation_id, "assistant", "after message", user_id=self.test_user.id)
+        repositories.save_memory_summary(conversation_id, "after summary", 7, user_id=self.test_user.id)
+        repositories.restore_snapshot(conversation_id, snapshot["id"], user_id=self.test_user.id)
 
-        self.assertEqual(repositories.get_state(conversation_id)["money"], 10)
-        restored_messages = repositories.get_messages(conversation_id)
+        self.assertEqual(repositories.get_state(conversation_id, user_id=self.test_user.id)["money"], 10)
+        restored_messages = repositories.get_messages(conversation_id, self.test_user.id)
         self.assertEqual(
             [(message["role"], message["content"]) for message in restored_messages],
             [(message["role"], message["content"]) for message in messages_at_snapshot],
         )
-        record = repositories.get_memory_summary_record(conversation_id)
+        record = repositories.get_memory_summary_record(conversation_id, self.test_user.id)
         self.assertEqual(record["summary"], "before summary")
         self.assertEqual(record["covered_until_sequence"], 2)
 
     def test_restore_failure_rolls_back_state_messages_and_summary_atomically(self):
         conversation_id = self.conversation["id"]
-        repositories.save_state(conversation_id, {"money": 10, "flags": ["current"]})
-        repositories.create_message(conversation_id, "user", "current message")
-        repositories.save_memory_summary(conversation_id, "current summary", 7)
-        snapshot = repositories.create_snapshot(conversation_id, name="branch")
-        repositories.save_state(conversation_id, {"money": 20, "flags": ["changed"]})
-        repositories.create_message(conversation_id, "assistant", "changed message")
-        repositories.save_memory_summary(conversation_id, "changed summary", 9)
-        current_messages = repositories.get_messages(conversation_id)
+        repositories.save_state(conversation_id, {"money": 10, "flags": ["current"]}, user_id=self.test_user.id)
+        repositories.create_message(conversation_id, "user", "current message", user_id=self.test_user.id)
+        repositories.save_memory_summary(conversation_id, "current summary", 7, user_id=self.test_user.id)
+        snapshot = repositories.create_snapshot(conversation_id, name="branch", user_id=self.test_user.id)
+        repositories.save_state(conversation_id, {"money": 20, "flags": ["changed"]}, user_id=self.test_user.id)
+        repositories.create_message(conversation_id, "assistant", "changed message", user_id=self.test_user.id)
+        repositories.save_memory_summary(conversation_id, "changed summary", 9, user_id=self.test_user.id)
+        current_messages = repositories.get_messages(conversation_id, self.test_user.id)
 
         real_connection = database.connect()
         original_execute = real_connection.execute
@@ -168,27 +168,27 @@ class ContextPersistenceTests(IsolatedDatabaseTestCase):
         failing_connection.execute.side_effect = fail_on_conversation_update
         with patch.object(repositories, "connect", return_value=failing_connection):
             with self.assertRaisesRegex(RuntimeError, "forced restore failure"):
-                repositories.restore_snapshot(conversation_id, snapshot["id"])
+                repositories.restore_snapshot(conversation_id, snapshot["id"], user_id=self.test_user.id)
 
-        self.assertEqual(repositories.get_state(conversation_id)["money"], 20)
-        self.assertEqual(repositories.get_messages(conversation_id), current_messages)
-        record = repositories.get_memory_summary_record(conversation_id)
+        self.assertEqual(repositories.get_state(conversation_id, user_id=self.test_user.id)["money"], 20)
+        self.assertEqual(repositories.get_messages(conversation_id, self.test_user.id), current_messages)
+        record = repositories.get_memory_summary_record(conversation_id, self.test_user.id)
         self.assertEqual(record["summary"], "changed summary")
         self.assertEqual(record["covered_until_sequence"], 9)
 
     def test_snapshot_restore_restores_summary_and_coverage_boundary(self):
         conversation_id = self.conversation["id"]
-        repositories.save_memory_summary(conversation_id, "before branch", 2)
-        snapshot = repositories.create_snapshot(conversation_id, name="branch")
+        repositories.save_memory_summary(conversation_id, "before branch", 2, user_id=self.test_user.id)
+        snapshot = repositories.create_snapshot(conversation_id, name="branch", user_id=self.test_user.id)
 
-        repositories.save_memory_summary(conversation_id, "after branch", 7)
-        repositories.restore_snapshot(conversation_id, snapshot["id"])
+        repositories.save_memory_summary(conversation_id, "after branch", 7, user_id=self.test_user.id)
+        repositories.restore_snapshot(conversation_id, snapshot["id"], user_id=self.test_user.id)
 
-        record = repositories.get_memory_summary_record(conversation_id)
+        record = repositories.get_memory_summary_record(conversation_id, self.test_user.id)
         self.assertEqual(record["summary"], "before branch")
         self.assertEqual(record["covered_until_sequence"], 2)
 
-        public_snapshot = repositories.get_snapshot(snapshot["id"])
+        public_snapshot = repositories.get_snapshot(snapshot["id"], self.test_user.id)
         self.assertNotIn("messages", public_snapshot)
         self.assertNotIn("memory_summary", public_snapshot)
         self.assertNotIn("memory_summary_covered_until_sequence", public_snapshot)

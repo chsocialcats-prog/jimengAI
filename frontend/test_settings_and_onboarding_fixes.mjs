@@ -28,3 +28,10 @@ test("开局设定弹窗无论是否只读都能通过关闭按钮关闭", () =>
   const onboarding = sourceSection(adventureSource, "function openAdventureOnboarding", "function toggleStatusSidebar");
   assert.match(onboarding, /type="button" data-close>关闭<\/button>/);
 });
+
+test("网站启动不再要求年龄确认", () => {
+  const init = sourceSection(source, "function init()", "init();");
+  assert.doesNotMatch(init, /showAgeGate\(\)/);
+  assert.doesNotMatch(init, /localStorage\.getItem\(AGE_KEY\)/);
+  assert.match(init, /startApp\(\);/);
+});

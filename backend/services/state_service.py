@@ -4,21 +4,22 @@
 import copy
 import json
 
-from .. import repositories
+from ..repository import conversation_repository
 
 
-def get_state(conversation_id):
+def get_state(access):
     """返回会话完整状态。"""
-    state = repositories.get_state(conversation_id)
+    conversation_id = access.conversation["id"]
+    user_id = access.auth.user.id
+    state = conversation_repository.get_state(conversation_id, user_id)
     if state.get("characters"):
         return state
-    conversation = repositories.get_conversation(conversation_id)
-    cards = repositories.get_conversation_cards(conversation)
-    characters = repositories._initial_character_states(cards, state)
+    cards = conversation_repository.get_conversation_cards(access.conversation)
+    characters = conversation_repository._initial_character_states(cards, state)
     if not characters:
         return state
     state["characters"] = characters
-    return repositories.save_state(conversation_id, state)
+    return conversation_repository.save_state(conversation_id, user_id, state)
 
 
 def _json_key(value):
@@ -281,11 +282,11 @@ def merge_state(current, delta):
     return new_state, changed
 
 
-def apply_state_delta(conversation_id, delta, source="AI"):
+def apply_state_delta(access, delta, source="AI"):
     """解析并持久化 AI 结构化状态变化。"""
     if not isinstance(delta, dict) or not delta:
-        return get_state(conversation_id)
-    current = get_state(conversation_id)
+        return get_state(access)
+    current = get_state(access)
     new_state, changed = merge_state(current, delta)
     if changed and not delta.get("logs"):
         new_state["logs"] = _append_logs(
@@ -299,14 +300,18 @@ def apply_state_delta(conversation_id, delta, source="AI"):
             ],
         )
     if changed:
-        return repositories.save_state(conversation_id, new_state)
+        return conversation_repository.save_state(
+            access.conversation["id"], access.auth.user.id, new_state
+        )
     return current
 
 
-def update_state(conversation_id, payload):
+def update_state(access, payload):
     """接口局部更新状态。"""
-    current = get_state(conversation_id)
+    current = get_state(access)
     new_state, changed = merge_state(current, payload)
     if changed:
-        return repositories.save_state(conversation_id, new_state)
+        return conversation_repository.save_state(
+            access.conversation["id"], access.auth.user.id, new_state
+        )
     return current

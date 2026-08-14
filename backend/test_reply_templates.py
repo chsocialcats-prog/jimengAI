@@ -57,7 +57,7 @@ class ReplyTemplateTests(IsolatedDatabaseTestCase):
                     {"id": "compact", "name": "简洁", "content": "只回复三段。"},
                 ],
                 "active_reply_template_id": "compact",
-            }
+            }, owner_user_id=self.test_user.id
         )
         self.assertEqual(
             [item["id"] for item in work["reply_templates"]], ["narrative", "compact"]
@@ -65,7 +65,7 @@ class ReplyTemplateTests(IsolatedDatabaseTestCase):
         self.assertEqual(work["active_reply_template_id"], "compact")
 
     def test_work_update_round_trip_preserves_two_templates_and_active_id(self):
-        work = repositories.create_work({"title": "模板作品"})
+        work = repositories.create_work({"title": "模板作品"}, owner_user_id=self.test_user.id)
 
         updated = repositories.update_work(
             work["id"],
@@ -75,7 +75,7 @@ class ReplyTemplateTests(IsolatedDatabaseTestCase):
                     {"id": "compact", "name": "简洁", "content": "只回复三段。"},
                 ],
                 "active_reply_template_id": "compact",
-            },
+            }, owner_user_id=self.test_user.id,
         )
 
         self.assertEqual(
@@ -112,7 +112,7 @@ class ReplyTemplateTests(IsolatedDatabaseTestCase):
                     {"id": "", "name": "", "content": ""},
                 ],
                 "active_reply_template_id": "missing",
-            }
+            }, owner_user_id=self.test_user.id
         )
         self.assertEqual(len(work["reply_templates"]), 1)
         self.assertEqual(work["active_reply_template_id"], "")
@@ -127,7 +127,7 @@ class ReplyTemplateTests(IsolatedDatabaseTestCase):
 
         for payload in payloads:
             with self.subTest(payload=payload):
-                self.assertIsNone(repositories.update_work(999999, payload))
+                self.assertIsNone(repositories.update_work(999999, payload, owner_user_id=self.test_user.id))
 
     def test_legacy_works_table_receives_empty_reply_template_defaults(self):
         self.db_path.unlink()
