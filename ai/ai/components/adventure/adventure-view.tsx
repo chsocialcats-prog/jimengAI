@@ -35,10 +35,12 @@ import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { StatusPanel } from './status-panel'
+import { ModelReasoningSelector } from './model-reasoning-selector'
 import { ThemeToggle } from '@/components/theme-toggle'
-import { api, streamChat, type AdventureState, type Conversation, type Snapshot, type StoryMessage } from '@/lib/api'
+import { api, streamChat, type AdventureState, type Conversation, type ModelProvider, type Snapshot, type StoryMessage } from '@/lib/api'
 import { useSession } from '@/components/session-provider'
 import { defaultReplyLength, loadReplyLength, saveReplyLength, type ReplyLengthKey } from '@/lib/reply-length'
+import { defaultReasoningEffort, loadReasoningEffort, saveReasoningEffort, type ReasoningEffortKey } from '@/lib/reasoning-effort'
 
 const emptyState: AdventureState = {
   attributes: {},
@@ -83,6 +85,9 @@ export function AdventureView() {
   const [correction, setCorrection] = useState('')
   const [correctionKind, setCorrectionKind] = useState('memory')
   const [replyLength, setReplyLength] = useState<ReplyLengthKey>(defaultReplyLength)
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffortKey>(defaultReasoningEffort)
+  const [providers, setProviders] = useState<ModelProvider[]>([])
+  const [providersLoading, setProvidersLoading] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [onboardingValues, setOnboardingValues] = useState<Record<string, string>>({})
   const [onboardingSaving, setOnboardingSaving] = useState(false)
@@ -128,6 +133,34 @@ export function AdventureView() {
     void loadAdventure()
   }, [conversationId, session.authenticated])
 
+  const refreshProviders = async () => {
+    const settings = await api.getSettings()
+    setProviders(settings.providers || [])
+  }
+
+  useEffect(() => {
+    if (!conversation || !session.authenticated) {
+      setProviders([])
+      return
+    }
+    let cancelled = false
+    const loadProviders = async () => {
+      setProvidersLoading(true)
+      try {
+        const settings = await api.getSettings()
+        if (cancelled) return
+        setProviders(settings.providers || [])
+        setReasoningEffort(loadReasoningEffort(conversation.id, settings.generation?.reasoning_effort))
+      } catch {
+        if (!cancelled) setProviders([])
+      } finally {
+        if (!cancelled) setProvidersLoading(false)
+      }
+    }
+    void loadProviders()
+    return () => { cancelled = true }
+  }, [conversation?.id, session.authenticated])
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, generating])
@@ -154,7 +187,7 @@ export function AdventureView() {
       },
       onError: (message) => toast.error(message),
       onFinish: () => setGenerating(false),
-    }, { reply_length: replyLength })
+    }, { reply_length: replyLength, reasoning_effort: reasoningEffort })
     try {
       const [nextMessages, nextConversation, nextState] = await Promise.all([
         api.getMessages(conversationId),
@@ -333,9 +366,9 @@ export function AdventureView() {
               )}
               <InputGroup className="rounded-3xl">
                 <InputGroupTextarea placeholder={conversation.status === 'archived' ? '该会话已归档，请先恢复后继续。' : '描述你的行动或对话…（Enter 发送，Shift+Enter 换行）'} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handleKeyDown} disabled={generating || conversation.status !== 'active'} className="min-h-[52px]" />
-                <InputGroupAddon align="block-end" className="justify-between">
-                  <div className="flex min-w-0 items-center gap-2"><button type="button" className="text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={() => openCorrection('persona')} disabled={generating}>修正人设</button><span className="text-border">·</span><button type="button" className="text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={() => openCorrection('memory')} disabled={generating}>修正记忆</button><select aria-label="回复长度" value={replyLength} onChange={(event) => setReplyLength(saveReplyLength(conversation.id, event.target.value))} disabled={generating} className="max-w-24 bg-transparent text-xs text-muted-foreground outline-none"><option value="short">简短</option><option value="standard">标准</option><option value="detailed">详细</option><option value="long">超长</option></select></div>
-                  {generating ? <InputGroupButton variant="outline" className="rounded-full" onClick={() => void stop()}><Square data-icon="inline-start" />停止</InputGroupButton> : <InputGroupButton variant="default" className="rounded-full" disabled={!input.trim() || conversation.status !== 'active'} onClick={() => void submit(input)}><Send data-icon="inline-start" />发送</InputGroupButton>}
+                <InputGroupAddon align="block-end" className="flex-wrap justify-between gap-x-2 gap-y-1.5">
+                  <div className="flex min-w-0 items-center gap-2"><button type="button" className="shrink-0 text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={() => openCorrection('persona')} disabled={generating}>修正人设</button><span className="shrink-0 text-border">·</span><button type="button" className="shrink-0 text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={() => openCorrection('memory')} disabled={generating}>修正记忆</button><select aria-label="回复长度" value={replyLength} onChange={(event) => setReplyLength(saveReplyLength(conversation.id, event.target.value))} disabled={generating} className="max-w-20 bg-transparent text-xs text-muted-foreground outline-none"><option value="short">简短</option><option value="standard">标准</option><option value="detailed">详细</option><option value="long">超长</option></select></div>
+                  <div className="ml-auto flex shrink-0 items-center gap-2"><ModelReasoningSelector providers={providers} providersLoading={providersLoading} reasoningEffort={reasoningEffort} disabled={generating || conversation.status !== 'active'} onReasoningEffortChange={(effort) => setReasoningEffort(saveReasoningEffort(conversation.id, effort))} onProvidersRefresh={refreshProviders} />{generating ? <InputGroupButton variant="outline" className="rounded-full" onClick={() => void stop()}><Square data-icon="inline-start" />停止</InputGroupButton> : <InputGroupButton variant="default" className="rounded-full" disabled={!input.trim() || conversation.status !== 'active'} onClick={() => void submit(input)}><Send data-icon="inline-start" />发送</InputGroupButton>}</div>
                 </InputGroupAddon>
               </InputGroup>
             </div>

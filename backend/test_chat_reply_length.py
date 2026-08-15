@@ -141,6 +141,45 @@ class ChatReplyLengthTests(unittest.TestCase):
 
         self.assertIsNone(self.client.calls[0]["max_tokens"])
 
+    def test_selected_reasoning_effort_overrides_only_the_current_turn(self):
+        captured = []
+
+        def create_recording_client(config, request_policy=None):
+            captured.append(config)
+            return self.client
+
+        with patch.object(chat_routes, "create_client", side_effect=create_recording_client):
+            list(
+                chat_routes._stream_ai_reply(
+                    self.access,
+                    self.stop_event,
+                    {"reasoning_effort": "max"},
+                    self.effective_config,
+                )
+            )
+
+        self.assertEqual(captured[0].generation["reasoning_effort"], "max")
+        self.assertNotIn("reasoning_effort", self.effective_config.generation)
+
+    def test_invalid_reasoning_effort_metadata_is_ignored(self):
+        captured = []
+
+        def create_recording_client(config, request_policy=None):
+            captured.append(config)
+            return self.client
+
+        with patch.object(chat_routes, "create_client", side_effect=create_recording_client):
+            list(
+                chat_routes._stream_ai_reply(
+                    self.access,
+                    self.stop_event,
+                    {"reasoning_effort": ["max"]},
+                    self.effective_config,
+                )
+            )
+
+        self.assertNotIn("reasoning_effort", captured[0].generation)
+
     def test_short_detailed_reply_gets_one_continuation_request(self):
         class ShortThenLongClient:
             def __init__(self):

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Pydantic request models for backend APIs."""
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +32,14 @@ class CardUpdate(BaseModel):
     initial_state: Optional[dict] = None
     character_attributes: Optional[dict] = None
     source: Optional[str] = None
+
+
+class CardImageSearch(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+
+
+class SearchImageFetch(BaseModel):
+    url: str = Field(..., min_length=1, max_length=2_000)
 
 
 class WorldbookCreate(BaseModel):
@@ -138,6 +146,16 @@ class ConversationCorrection(BaseModel):
 class ChatRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=4000)
     metadata: dict = Field(default_factory=dict)
+
+
+class AssistantMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=4000)
+
+
+class AssistantChatRequest(BaseModel):
+    messages: list[AssistantMessage] = Field(..., min_length=1, max_length=16)
+    page_path: str = Field("", max_length=240)
 
 
 class SnapshotCreate(BaseModel):

@@ -6,7 +6,7 @@ from __future__ import annotations
 import sqlite3
 
 
-ACCOUNT_SCHEMA_VERSION = 4
+ACCOUNT_SCHEMA_VERSION = 7
 ACCOUNT_MIGRATION_STATE_KEY = "account_migration_state"
 _VALID_MIGRATION_STATES = {"unclaimed", "needs_secret_cleanup", "complete"}
 
@@ -69,6 +69,36 @@ def _create_account_tables(connection: sqlite3.Connection) -> None:
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS user_ai_providers (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            provider_id TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            base_url TEXT NOT NULL,
+            protocol TEXT NOT NULL DEFAULT 'openai-completions',
+            model TEXT NOT NULL,
+            models_json TEXT NOT NULL DEFAULT '[]',
+            timeout_seconds INTEGER NOT NULL DEFAULT 60,
+            is_active INTEGER NOT NULL DEFAULT 0,
+            api_key_ciphertext TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, provider_id)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_user_ai_providers_user_active ON user_ai_providers(user_id, is_active)",
+        """
+        CREATE TABLE IF NOT EXISTS daily_checkins (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            checkin_date TEXT NOT NULL,
+            checked_in_at TEXT NOT NULL,
+            fortune_json TEXT NOT NULL DEFAULT '',
+            streak_days INTEGER NOT NULL DEFAULT 0,
+            points_awarded INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (user_id, checkin_date)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_daily_checkins_user_date ON daily_checkins(user_id, checkin_date DESC)",
+        """
         CREATE TABLE IF NOT EXISTS app_meta (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL,
@@ -127,6 +157,28 @@ def _add_user_profile_columns(connection: sqlite3.Connection) -> None:
     )
 
 
+def _add_daily_checkin_columns(connection: sqlite3.Connection) -> None:
+    """Extend legacy check-ins without replacing the existing account history."""
+    _ensure_column(
+        connection,
+        "daily_checkins",
+        "fortune_json",
+        "ALTER TABLE daily_checkins ADD COLUMN fortune_json TEXT NOT NULL DEFAULT ''",
+    )
+    _ensure_column(
+        connection,
+        "daily_checkins",
+        "streak_days",
+        "ALTER TABLE daily_checkins ADD COLUMN streak_days INTEGER NOT NULL DEFAULT 0",
+    )
+    _ensure_column(
+        connection,
+        "daily_checkins",
+        "points_awarded",
+        "ALTER TABLE daily_checkins ADD COLUMN points_awarded INTEGER NOT NULL DEFAULT 1",
+    )
+
+
 def _ensure_migration_state(connection: sqlite3.Connection) -> None:
     row = connection.execute(
         "SELECT value FROM app_meta WHERE key = ?", (ACCOUNT_MIGRATION_STATE_KEY,)
@@ -150,6 +202,7 @@ def migrate_account_schema(connection: sqlite3.Connection) -> None:
     connection.execute("PRAGMA foreign_keys = ON")
     _create_account_tables(connection)
     _add_user_profile_columns(connection)
+    _add_daily_checkin_columns(connection)
     _add_legacy_ownership_columns(connection)
     _ensure_migration_state(connection)
     current_version = connection.execute("PRAGMA user_version").fetchone()[0]

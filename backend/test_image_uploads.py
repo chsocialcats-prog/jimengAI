@@ -64,6 +64,19 @@ class ImageUploadRouteTests(unittest.TestCase):
         self.assertEqual(response.json(), {"url": "/uploads/7/image.png"})
         store.assert_called_once_with(image, user_id=7)
 
+    def test_search_image_route_returns_an_allowlisted_image_for_local_cropping(self):
+        image = b"\x89PNG\r\n\x1a\nimage"
+        with patch("backend.routers.uploads_routes.fetch_search_thumbnail", return_value=(image, "png")) as fetch:
+            response = self.client.post(
+                "/api/uploads/search-image",
+                json={"url": "https://ts1.mm.bing.net/th?id=OIP.example"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "image/png")
+        self.assertEqual(response.content, image)
+        fetch.assert_called_once_with("https://ts1.mm.bing.net/th?id=OIP.example")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,13 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
 
+# Some managed Windows/network environments intercept public HTTPS destinations
+# through the RFC 2544 benchmarking range. The origin has already passed the
+# explicit provider allowlist before this exception is considered, so this does
+# not make arbitrary private targets reachable through the model endpoint.
+_MANAGED_EGRESS_NETWORK = ipaddress.ip_network("198.18.0.0/15")
+
+
 class AIRequestPolicyError(ValueError):
     code = "ai_origin_not_allowed"
     message = "AI Base URL 不符合出站安全策略"
@@ -93,6 +100,8 @@ class AIRequestPolicy:
         address = ipaddress.ip_address(value)
         if address.is_loopback or address.is_link_local or address.is_multicast or address.is_unspecified:
             return False
+        if address in _MANAGED_EGRESS_NETWORK:
+            return origin in self.allowed_origins
         if address.is_private:
             if any(address in network for network in self.allowed_private_networks):
                 return True

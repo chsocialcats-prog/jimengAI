@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..repository import cards as card_repository
 from ..auth.dependencies import optional_user, require_user
-from ..schemas import CardCreate, CardUpdate
+from ..schemas import CardCreate, CardImageSearch, CardUpdate
+from ..services.image_search import ImageSearchError, search_character_images
 from ._error_helpers import (
     _raise_no_update_fields,
     _raise_not_found,
@@ -39,6 +40,42 @@ def create_card(payload: CardCreate, user=Depends(require_user)):
     if not data.get("name", "").strip():
         _raise_validation_error("角色名不能为空")
     return card_repository.create_card(data, owner_user_id=user.id)
+
+
+@router.post("/image-candidates", summary="搜索角色卡在线候选图")
+def search_card_images(payload: CardImageSearch, user=Depends(require_user)):
+    """Search Model Studio's web-image tool without exposing its credentials."""
+    try:
+        return search_character_images(payload.name)
+    except ImageSearchError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "image_search_unavailable", "message": str(exc)},
+        ) from exc
+
+
+@router.post("/fill-missing-images", summary="为未配图角色卡批量补图")
+def fill_missing_card_images(user=Depends(require_user)):
+    """Apply the first safe Model Studio result to each avatarless owned card."""
+    updated = []
+    failed = []
+    for card in card_repository.list_owned_cards_without_avatar(user.id):
+        try:
+            result = search_character_images(card["name"])
+        except ImageSearchError as exc:
+            failed.append({"id": card["id"], "name": card["name"], "error": str(exc)})
+            continue
+        items = result.get("items")
+        if not isinstance(items, list) or not items or not isinstance(items[0], dict):
+            failed.append({"id": card["id"], "name": card["name"], "error": "没有找到可用图片"})
+            continue
+        image_url = items[0].get("image_url")
+        if not isinstance(image_url, str) or not image_url:
+            failed.append({"id": card["id"], "name": card["name"], "error": "图片地址无效"})
+            continue
+        card_repository.update_card(card["id"], {"avatar_url": image_url}, owner_user_id=user.id)
+        updated.append({"id": card["id"], "name": card["name"], "image_url": image_url})
+    return {"updated": updated, "failed": failed}
 
 
 @router.get("/{card_id}", summary="角色卡详情")

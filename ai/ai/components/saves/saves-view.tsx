@@ -43,6 +43,8 @@ export function SavesView() {
   const [works, setWorks] = useState<Work[]>([])
   const [loading, setLoading] = useState(true)
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null)
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false)
+  const [deletingAll, setDeletingAll] = useState(false)
   const [snapshotTarget, setSnapshotTarget] = useState<Conversation | null>(null)
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
   const [snapshotLoading, setSnapshotLoading] = useState(false)
@@ -88,6 +90,21 @@ export function SavesView() {
       setDeleteTarget(null)
     } catch (error) { toast.error(error instanceof Error ? error.message : '删除失败') }
   }
+  const deleteAllConversations = async () => {
+    setDeletingAll(true)
+    try {
+      const result = await api.deleteAllConversations()
+      setConversations([])
+      setSnapshots([])
+      setSnapshotTarget(null)
+      setDeleteAllOpen(false)
+      toast.success(`已删除 ${result.deleted} 个存档`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '删除全部存档失败')
+    } finally {
+      setDeletingAll(false)
+    }
+  }
   const createSnapshot = async () => {
     if (!snapshotTarget) return
     try {
@@ -108,10 +125,11 @@ export function SavesView() {
   if (!session.authenticated) return <SavesEmpty title="登录后查看存档" description="冒险会话和手动存档都只对当前账户可见。" actionLabel="前往登录" />
   if (loading) return <div className="flex min-h-[60vh] items-center justify-center text-sm text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />正在读取存档…</div>
 
-  return <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6"><header className="flex flex-col gap-1.5"><h1 className="font-rounded text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">我的存档</h1><p className="text-sm text-muted-foreground">继续未完成的冒险、管理会话状态，或恢复手动存档点。</p></header>{conversations.length === 0 ? <SavesEmpty title="还没有冒险存档" description="从作品库开始一次冒险后，进度会自动保存到这里。" actionLabel="前往作品库" /> : <div className="mt-6 flex flex-col gap-4">{conversations.map((conversation) => <ConversationRow key={conversation.id} conversation={conversation} work={conversation.work_id ? workById.get(conversation.work_id) : undefined} onContinue={() => void continueAdventure(conversation)} onSnapshots={() => void openSnapshots(conversation)} onArchive={() => void toggleArchive(conversation)} onDelete={() => setDeleteTarget(conversation)} />)}</div>}
+  return <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6"><header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h1 className="font-rounded text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">我的存档</h1><p className="mt-1.5 text-sm text-muted-foreground">继续未完成的冒险、管理会话状态，或恢复手动存档点。</p></div>{conversations.length > 0 && <Button variant="outline" className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setDeleteAllOpen(true)}><Trash2 data-icon="inline-start" />删除全部</Button>}</header>{conversations.length === 0 ? <SavesEmpty title="还没有冒险存档" description="从作品库开始一次冒险后，进度会自动保存到这里。" actionLabel="前往作品库" /> : <div className="mt-6 flex flex-col gap-4">{conversations.map((conversation) => <ConversationRow key={conversation.id} conversation={conversation} work={conversation.work_id ? workById.get(conversation.work_id) : undefined} onContinue={() => void continueAdventure(conversation)} onSnapshots={() => void openSnapshots(conversation)} onArchive={() => void toggleArchive(conversation)} onDelete={() => setDeleteTarget(conversation)} />)}</div>}
 
     <Dialog open={!!snapshotTarget} onOpenChange={(open) => !open && setSnapshotTarget(null)}><DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-xl"><DialogHeader><DialogTitle>{snapshotTarget?.title || '存档点'}</DialogTitle><DialogDescription>手动存档会保存该会话的剧情消息与角色状态。</DialogDescription></DialogHeader><div className="flex justify-end"><Button variant="outline" size="sm" onClick={() => void createSnapshot()}><Save />创建手动存档</Button></div>{snapshotLoading ? <p className="py-8 text-center text-sm text-muted-foreground">正在读取存档点…</p> : snapshots.length ? <div className="flex flex-col gap-2">{snapshots.map((snapshot) => <div key={snapshot.id} className="flex items-center gap-3 rounded-2xl border border-border p-3"><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{snapshot.name}</p><p className="mt-1 text-xs text-muted-foreground">{formatDate(snapshot.created_at)}{snapshot.note ? ` · ${snapshot.note}` : ''}</p></div><Button size="sm" className="rounded-full" onClick={() => void restoreSnapshot(snapshot)}><RotateCcw />恢复</Button></div>)}</div> : <p className="py-8 text-center text-sm text-muted-foreground">还没有手动存档点。</p>}<DialogFooter><Button variant="ghost" onClick={() => setSnapshotTarget(null)}>关闭</Button></DialogFooter></DialogContent></Dialog>
     <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>确认删除这个冒险？</AlertDialogTitle><AlertDialogDescription>会话消息、状态与关联的存档点都会被删除，且无法恢复。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>取消</AlertDialogCancel><AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => void deleteConversation()}>删除存档</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+    <AlertDialog open={deleteAllOpen} onOpenChange={setDeleteAllOpen}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>确认删除全部存档？</AlertDialogTitle><AlertDialogDescription>这会删除当前账户的全部冒险会话、消息、状态和存档点，无法恢复。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={deletingAll}>取消</AlertDialogCancel><AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" disabled={deletingAll} onClick={() => void deleteAllConversations()}>{deletingAll ? '正在删除…' : '删除全部存档'}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
   </div>
 }
 

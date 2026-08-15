@@ -32,8 +32,10 @@ from .config import AUTH_KEY_PATH, CONFIG_PATH
 from .database import connect, init_db
 from .routers import (
     cards_routes,
+    assistant_routes,
     chat_routes,
     conversations_routes,
+    daily_checkin_routes,
     imports_routes,
     settings_routes,
     auth_routes,
@@ -127,6 +129,8 @@ def health_check():
 for router in (
     auth_routes.router,
     settings_routes.router,
+    daily_checkin_routes.router,
+    assistant_routes.router,
     uploads_routes.router,
     cards_routes.router,
     imports_routes.router,

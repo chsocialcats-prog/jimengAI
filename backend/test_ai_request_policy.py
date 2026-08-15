@@ -47,6 +47,22 @@ class AIRequestPolicyTests(unittest.TestCase):
         with self.assertRaises(AIRequestPolicyError):
             policy.validate_base_url("https://api.deepseek.com/v1")
 
+    def test_allows_the_managed_egress_range_only_after_origin_allowlisting(self):
+        policy = AIRequestPolicy(
+            allowed_origins=("https://api.deepseek.com",),
+            resolver=lambda host, port: ["198.18.0.69"],
+        )
+
+        approved = policy.validate_base_url("https://api.deepseek.com/v1")
+        self.assertEqual(approved.origin, "https://api.deepseek.com")
+
+        blocked = AIRequestPolicy(
+            allowed_origins=("https://api.deepseek.com",),
+            resolver=lambda host, port: ["192.168.1.15"],
+        )
+        with self.assertRaises(AIRequestPolicyError):
+            blocked.validate_base_url("https://api.deepseek.com/v1")
+
     def test_blocks_redirects_and_never_allows_cross_origin_authorization(self):
         target = self.policy.validate_base_url("https://api.deepseek.com/v1")
         self.assertFalse(self.policy.allow_redirect(target, "https://api.deepseek.com/next"))

@@ -109,11 +109,13 @@ class DeepSeekClient:
         if isinstance(config, dict):
             deepseek = config["deepseek"]
             generation = config["generation"]
+            self.provider_id = deepseek.get("provider_id", "deepseek")
             self.base_url = deepseek["base_url"].rstrip("/")
             self.model = deepseek["model"]
             self.api_key = deepseek.get("api_key", "")
             self.timeout_seconds = float(deepseek.get("timeout_seconds", 60))
         else:
+            self.provider_id = getattr(config, "provider_id", "deepseek")
             self.base_url = config.base_url.rstrip("/")
             self.model = config.model
             self.api_key = config.api_key
@@ -174,7 +176,11 @@ class DeepSeekClient:
                 self.max_tokens if max_tokens is None else int(max_tokens)
             ),
         }
-        if self.reasoning_effort in ("high", "max"):
+        # `thinking` is DeepSeek's extension to the OpenAI wire format. Other
+        # OpenAI-compatible brands commonly reject unknown request fields, so
+        # use their portable temperature path unless a provider gets a dedicated
+        # adapter in the future.
+        if self.provider_id == "deepseek" and self.reasoning_effort in ("high", "max"):
             payload["thinking"] = {"type": "enabled"}
             payload["reasoning_effort"] = self.reasoning_effort
         else:

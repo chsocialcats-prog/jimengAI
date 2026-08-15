@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "targets": {
+    "global-floating-quick-actions": {
+      "targetKind": "new-target",
+      "projectId": "4ce438d3-3b17-4fbc-b404-86158d9c68b2",
+      "activeDraftId": "1cec5db6-443d-4f7b-8c56-b79ed7fc19f6",
+      "selectionStatus": "approved",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "ai/ai/components/app-shell.tsx",
+        "ai/ai/app/globals.css",
+        "ai/ai/components/ui/button.tsx",
+        "ai/ai/components/ui/tooltip.tsx",
+        "ai/ai/components/floating-quick-actions.tsx",
+        "ai/ai/components/ui/dialog.tsx"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "09bf361a88fc40791671e871b3230c0efe1173e12bd3b35fec993eaa2749a8f0",
+        "ai/ai/components/app-shell.tsx": "146986fb9d4c7b98986f71915cd3543bcff603bd01d9a4011e84ed8642271edf",
+        "ai/ai/app/globals.css": "77e592823b6d71b519edb43942bee5ebb26c82090a207e6cc565b3b9d90adf22",
+        "ai/ai/components/ui/button.tsx": "d14549ab3ba7a9d5d1f424c2599233bffa0b317121abf3b6efa2fb902d5e2781",
+        "ai/ai/components/ui/tooltip.tsx": "2cea2294d4947b88d815860f64e0b5e0eb47a59bde47cfd194aac2230c923865",
+        "ai/ai/components/floating-quick-actions.tsx": "9be000e495e5e4c9d9086431118fa6d5237260ce6429a5dddb69bba282636813",
+        "ai/ai/components/ui/dialog.tsx": "2ccf791144e2ccbd1e69720e75010ab2e3b0186694afbfe7f7e27d886ac35cd2"
+      },
+      "components": [],
+      "drafts": {
+        "80db2876-f398-4feb-a1b1-3a03941c89d9": {
+          "title": "织梦 - 浮动效率工具台",
+          "visualDirection": "baseline left-edge inline action row",
+          "currentVersion": 1
+        },
+        "bd8c3212-ab79-487d-99d4-bcc4e805e8d2": {
+          "title": "织梦 - 交互式效率浮台",
+          "visualDirection": "click-to-toggle radial inward arc",
+          "parentDraftId": "80db2876-f398-4feb-a1b1-3a03941c89d9",
+          "currentVersion": 1
+        },
+        "22bb2f79-fb69-4752-b840-322473966880": {
+          "title": "织梦 - 紧凑型浮动工具扇面",
+          "visualDirection": "compact vertical inward fan",
+          "parentDraftId": "80db2876-f398-4feb-a1b1-3a03941c89d9",
+          "currentVersion": 1
+        },
+        "1cec5db6-443d-4f7b-8c56-b79ed7fc19f6": {
+          "title": "织梦 - 效率工具增强",
+          "visualDirection": "approved 58px launcher with available random work action",
+          "parentDraftId": "bd8c3212-ab79-487d-99d4-bcc4e805e8d2",
+          "currentVersion": 2
+        }
+      },
+      "updatedAt": "2026-08-15T09:14:23Z"
+    },
+    "daily-fortune-checkin-dialog": {
+      "targetKind": "new-target",
+      "projectId": "4ce438d3-3b17-4fbc-b404-86158d9c68b2",
+      "activeDraftId": "c0d7c84e-ed5a-4b09-a78b-18d8c11e7ce9",
+      "selectionStatus": "approved",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "ai/ai/components/app-shell.tsx",
+        "ai/ai/app/globals.css",
+        "ai/ai/components/ui/button.tsx",
+        "ai/ai/components/ui/tooltip.tsx",
+        "ai/ai/components/floating-quick-actions.tsx",
+        "ai/ai/components/daily-fortune-dialog.tsx",
+        "ai/ai/components/ui/dialog.tsx"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "09bf361a88fc40791671e871b3230c0efe1173e12bd3b35fec993eaa2749a8f0",
+        "ai/ai/components/app-shell.tsx": "146986fb9d4c7b98986f71915cd3543bcff603bd01d9a4011e84ed8642271edf",
+        "ai/ai/app/globals.css": "77e592823b6d71b519edb43942bee5ebb26c82090a207e6cc565b3b9d90adf22",
+        "ai/ai/components/ui/button.tsx": "d14549ab3ba7a9d5d1f424c2599233bffa0b317121abf3b6efa2fb902d5e2781",
+        "ai/ai/components/ui/tooltip.tsx": "2cea2294d4947b88d815860f64e0b5e0eb47a59bde47cfd194aac2230c923865",
+        "ai/ai/components/floating-quick-actions.tsx": "9be000e495e5e4c9d9086431118fa6d5237260ce6429a5dddb69bba282636813",
+        "ai/ai/components/daily-fortune-dialog.tsx": "47931fb68fbc8384fbafcf57a48137084aaa1deb2e25ec28c349201693057bb4",
+        "ai/ai/components/ui/dialog.tsx": "2ccf791144e2ccbd1e69720e75010ab2e3b0186694afbfe7f7e27d886ac35cd2"
+      },
+      "components": [],
+      "drafts": {
+        "1cec5db6-443d-4f7b-8c56-b79ed7fc19f6": {
+          "title": "织梦 - 效率工具列",
+          "visualDirection": "approved quick-action launcher baseline",
+          "currentVersion": 1
+        },
+        "a99b8c8b-c3b3-4059-8a48-aa6b88f79423": {
+          "title": "织梦 - 每日签到与运势",
+          "visualDirection": "reading-led verse with ruled facts",
+          "parentDraftId": "1cec5db6-443d-4f7b-8c56-b79ed7fc19f6",
+          "currentVersion": 1
+        },
+        "c0d7c84e-ed5a-4b09-a78b-18d8c11e7ce9": {
+          "title": "织梦 - 签到运势等级体系优化",
+          "visualDirection": "compact balanced fortune details with rank hierarchy",
+          "parentDraftId": "1cec5db6-443d-4f7b-8c56-b79ed7fc19f6",
+          "currentVersion": 5
+        }
+      },
+      "updatedAt": "2026-08-15T09:06:02Z"
+    },
+    "web-assistant-read-only-context": {
+      "targetKind": "existing-ui",
+      "projectId": "4ce438d3-3b17-4fbc-b404-86158d9c68b2",
+      "baselineDraftId": "7a4d0dca-9bce-4d06-a75d-663ca5826530",
+      "activeDraftId": "7a4d0dca-9bce-4d06-a75d-663ca5826530",
+      "selectionStatus": "approved",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "ai/ai/components/app-shell.tsx",
+        "ai/ai/components/web-assistant-sheet.tsx",
+        "ai/ai/components/ui/sheet.tsx",
+        "ai/ai/components/ui/button.tsx",
+        "ai/ai/components/ui/tooltip.tsx",
+        "ai/ai/components/ui/avatar.tsx",
+        "ai/ai/components/ui/textarea.tsx",
+        "ai/ai/app/globals.css"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "09bf361a88fc40791671e871b3230c0efe1173e12bd3b35fec993eaa2749a8f0",
+        "ai/ai/components/app-shell.tsx": "146986fb9d4c7b98986f71915cd3543bcff603bd01d9a4011e84ed8642271edf",
+        "ai/ai/components/web-assistant-sheet.tsx": "ba097759e8c13a11e9c260ca1db0a6b22b7085c761635930e112b1dbd57826da",
+        "ai/ai/components/ui/sheet.tsx": "346de71c2d7c2a43f857c9abb13fb5e6d4a0a228e87338fce29f6dd42010dd89",
+        "ai/ai/components/ui/button.tsx": "d14549ab3ba7a9d5d1f424c2599233bffa0b317121abf3b6efa2fb902d5e2781",
+        "ai/ai/components/ui/tooltip.tsx": "2cea2294d4947b88d815860f64e0b5e0eb47a59bde47cfd194aac2230c923865",
+        "ai/ai/components/ui/avatar.tsx": "357b2f9aac0192c071cb2ed65cb6e4c8ec01fa02fc15cf50d889b85731b75666",
+        "ai/ai/components/ui/textarea.tsx": "58b58d84fc54ba5f4ca46937870c619349fd9eccc4d494250ac7bc73a94e05e9",
+        "ai/ai/app/globals.css": "77e592823b6d71b519edb43942bee5ebb26c82090a207e6cc565b3b9d90adf22"
+      },
+      "components": [],
+      "drafts": {
+        "7a4d0dca-9bce-4d06-a75d-663ca5826530": {
+          "title": "Zhimeng AI Assistant Sheet with Read-Only Indicator",
+          "visualDirection": "existing right sheet with read-only context status",
+          "currentVersion": 2
+        }
+      },
+      "updatedAt": "2026-08-15T09:27:56Z"
+    }
+  }
+}

@@ -49,6 +49,18 @@ def list_cards(q="", page=1, page_size=20, *, viewer_user_id=None):
     }
 
 
+def list_owned_cards_without_avatar(owner_user_id):
+    """Return only the current owner's role cards that have no avatar URL."""
+    rows = database.fetch_all(
+        "SELECT cards.*, users.username AS owner_username FROM cards "
+        "LEFT JOIN users ON users.id = cards.owner_user_id "
+        "WHERE cards.owner_user_id = ? AND TRIM(COALESCE(cards.avatar_url, '')) = '' "
+        "ORDER BY cards.updated_at DESC, cards.id DESC",
+        (owner_user_id,),
+    )
+    return [row_to_card(row, owner_user_id) for row in rows]
+
+
 def get_card(card_id, *, viewer_user_id=None):
     """按主键读取角色卡。"""
     return row_to_card(database.fetch_one(

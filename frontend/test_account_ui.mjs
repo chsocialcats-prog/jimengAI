@@ -29,3 +29,13 @@ test("世界书编辑器复用账户 API，并按 can_edit 管理条目", () => 
   assert.match(worldbookPageSource, /projectOwnership\(book\)\.canEdit/);
   assert.doesNotMatch(worldbookPageSource, /owner_username\s*===/);
 });
+
+test("世界书详情按概览和可扫描条目展示设定", () => {
+  const detailStart = worldbookPageSource.indexOf("export async function renderWorldbookDetail");
+  const editorStart = worldbookPageSource.indexOf("function entryDraftHtml", detailStart);
+  const detail = worldbookPageSource.slice(detailStart, editorStart);
+  for (const marker of ["resource-detail-overview", "世界观概览", "worldbook-detail-entry", "设定索引", "worldbook-entry-content"]) {
+    assert.match(detail, new RegExp(marker));
+  }
+  assert.match(detail, /keywords\.map\(\(keyword\)/);
+});

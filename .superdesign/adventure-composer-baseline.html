@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>本地故事库 - 冒险对话</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
+    <style>
+      body { font-family: Inter, "Microsoft YaHei", system-ui, sans-serif; }
+    </style>
+  </head>
+  <body>
+    <div class="min-h-screen bg-stone-50 text-slate-800">
+      <aside class="fixed inset-y-0 left-0 hidden w-60 border-r border-stone-200 bg-white lg:block">
+        <div class="flex h-16 items-center gap-2 border-b border-stone-100 px-5 text-base font-semibold">
+          <span class="h-2.5 w-2.5 rounded-full bg-emerald-500"></span> 本地故事库
+        </div>
+        <nav class="space-y-1 p-3 text-sm text-slate-500">
+          <div class="flex items-center gap-3 rounded-lg px-3 py-2"><iconify-icon icon="lucide:library" width="18"></iconify-icon>故事库</div>
+          <div class="flex items-center gap-3 rounded-lg bg-rose-50 px-3 py-2 font-medium text-rose-700"><iconify-icon icon="lucide:messages-square" width="18"></iconify-icon>正在冒险</div>
+          <div class="flex items-center gap-3 rounded-lg px-3 py-2"><iconify-icon icon="lucide:book-open-text" width="18"></iconify-icon>素材库</div>
+        </nav>
+      </aside>
+      <main class="mx-auto flex min-h-screen max-w-5xl flex-col px-5 pb-7 pt-7 lg:ml-[calc(15rem+2rem)] lg:mr-8">
+        <header class="mb-7 flex items-center justify-between border-b border-stone-200 pb-4">
+          <div>
+            <p class="text-sm text-slate-400">正在进行的故事</p>
+            <h1 class="mt-1 text-xl font-semibold">雾港的来信</h1>
+          </div>
+          <button aria-label="更多设置" class="grid h-9 w-9 place-items-center rounded-lg border border-stone-200 bg-white text-slate-500"><iconify-icon icon="lucide:settings-2" width="18"></iconify-icon></button>
+        </header>
+        <section class="flex flex-1 flex-col gap-5">
+          <div class="max-w-[82%] self-start rounded-2xl rounded-tl-md border border-stone-200 bg-white px-4 py-3 text-sm leading-6 shadow-sm">雨水沿着煤气灯滑落。渡船靠岸时，港口的雾还没有散。</div>
+          <div class="max-w-[82%] self-end rounded-2xl rounded-tr-md bg-rose-600 px-4 py-3 text-sm leading-6 text-white">我查看信封上的火漆印记。</div>
+          <div class="max-w-[82%] self-start rounded-2xl rounded-tl-md border border-stone-200 bg-white px-4 py-3 text-sm leading-6 shadow-sm">印记属于失踪多年的航海协会。信封里只有一张没有署名的船票。</div>
+        </section>
+        <section class="mt-6 rounded-3xl border border-stone-200 bg-white p-3 shadow-sm">
+          <textarea aria-label="发送消息" class="h-24 w-full resize-none border-0 bg-transparent px-3 pt-2 text-[15px] text-slate-700 outline-none placeholder:text-slate-400" placeholder="给智能体发送消息"></textarea>
+          <div class="flex items-center justify-between gap-3 px-1 pt-1">
+            <div class="flex min-w-0 items-center gap-1.5">
+              <button aria-label="修正人设" class="flex h-8 items-center gap-1 rounded-md px-2 text-sm text-slate-500 hover:bg-stone-100"><iconify-icon icon="lucide:sliders-horizontal" width="16"></iconify-icon><span class="hidden sm:inline">修正人设</span></button>
+              <button aria-label="修正记忆" class="flex h-8 items-center gap-1 rounded-md px-2 text-sm text-slate-500 hover:bg-stone-100"><iconify-icon icon="lucide:brain" width="16"></iconify-icon><span class="hidden sm:inline">修正记忆</span></button>
+              <button aria-label="回复长度" class="flex h-8 items-center gap-1 rounded-md px-2 text-sm text-slate-500 hover:bg-stone-100"><span>回复长度</span><iconify-icon icon="lucide:chevron-down" width="15"></iconify-icon></button>
+            </div>
+            <button aria-label="发送" class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-rose-600 text-white shadow-sm"><iconify-icon icon="lucide:arrow-up" width="20"></iconify-icon></button>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

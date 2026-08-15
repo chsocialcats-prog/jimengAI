@@ -148,6 +148,23 @@ class DeepSeekReasoningPayloadTests(unittest.TestCase):
         self.assertNotIn("thinking", payload)
         self.assertNotIn("reasoning_effort", payload)
 
+    def test_openai_compatible_provider_uses_portable_generation_fields(self):
+        config = _client_config("high")
+        config["deepseek"]["provider_id"] = "openai"
+        captured = []
+
+        def capture_request(request, timeout):
+            captured.append(json.loads(request.data.decode("utf-8")))
+            return _StreamingResponse()
+
+        client = deepseek_client.DeepSeekClient(config)
+        with patch.object(deepseek_client.urllib.request, "urlopen", side_effect=capture_request):
+            list(client._stream_once([{"role": "user", "content": "hello"}], False))
+
+        self.assertEqual(captured[0]["temperature"], 0.35)
+        self.assertNotIn("thinking", captured[0])
+        self.assertNotIn("reasoning_effort", captured[0])
+
     def test_config_merge_public_config_and_update_preserve_reasoning_effort(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.json"

@@ -15,7 +15,8 @@ class HttpSecurityTests(unittest.TestCase):
         apply_auth_cookies(response, IssuedSession(7, "opaque-token", "2026-09-12T00:00:00+00:00"), "csrf", secure=False)
         set_no_store(response)
         cookies = "\n".join(response.headers.getlist("set-cookie"))
-        self.assertIn("neko_session=opaque-token; HttpOnly; Path=/; SameSite=lax", cookies)
+        self.assertIn("neko_session=opaque-token; HttpOnly;", cookies)
+        self.assertRegex(cookies, r"neko_session=.*Max-Age=\d+; Path=/; SameSite=lax")
         self.assertIn("neko_csrf=csrf; Path=/; SameSite=lax", cookies)
         self.assertNotIn("Domain=", cookies)
         self.assertEqual(response.headers["cache-control"], "no-store")
@@ -61,13 +62,16 @@ class HttpSecurityTests(unittest.TestCase):
 
     def test_runtime_settings_parse_local_safe_defaults_and_trusted_proxies(self):
         from backend.auth.runtime_settings import RuntimeSettings
+        from backend.services.provider_catalog import builtin_provider_origins
 
         settings = RuntimeSettings.from_environ({"NEKO_TRUSTED_PROXY_CIDRS": "127.0.0.0/8,10.0.0.0/8"})
         self.assertFalse(settings.cookie_secure)
         self.assertEqual(settings.public_origin, None)
         self.assertTrue(settings.is_trusted_proxy("127.0.0.1"))
         self.assertFalse(settings.is_trusted_proxy("192.168.1.5"))
-        self.assertEqual(settings.ai_allowed_origins, ("https://api.deepseek.com",))
+        self.assertEqual(settings.ai_allowed_origins, builtin_provider_origins())
+        self.assertIn("https://api.openai.com", settings.ai_allowed_origins)
+        self.assertIn("https://api.moonshot.cn", settings.ai_allowed_origins)
 
     def test_runtime_settings_parse_explicit_origins_and_origin_policy_trusts_forwarding_only_for_proxy(self):
         from backend.auth.origin import OriginPolicy

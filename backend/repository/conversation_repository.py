@@ -394,6 +394,15 @@ def delete_conversation(conversation_id, user_id):
     database.execute("DELETE FROM conversations WHERE id = ? AND user_id = ?", (conversation_id, user_id))
 
 
+def delete_all_conversations(user_id, *, connect_fn=database.connect):
+    """Delete every conversation owned by one account and return the count."""
+    with closing(connect_fn()) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        cursor = connection.execute("DELETE FROM conversations WHERE user_id = ?", (user_id,))
+        connection.commit()
+        return cursor.rowcount
+
+
 def row_to_message(row):
     """把消息数据库行转为接口字典。"""
     if row is None:

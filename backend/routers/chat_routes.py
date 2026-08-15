@@ -2,6 +2,7 @@
 """流式对话 SSE 与停止接口。"""
 
 import threading
+from dataclasses import replace
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
@@ -32,6 +33,7 @@ from .settings_routes import _service as _get_user_ai_settings_service
 router = APIRouter(prefix="/api/conversations", tags=["流式对话"])
 _activity_registry_init_lock = threading.Lock()
 _MAX_CONTINUATION_ATTEMPTS = 2
+_REASONING_EFFORTS = frozenset({"off", "high", "max"})
 
 
 class _MockEffectiveAIConfig(EffectiveAIConfig):
@@ -61,8 +63,21 @@ def _client_config(config):
             timeout_seconds=config.timeout_seconds,
             ai_enabled=config.ai_enabled,
             api_key_unreadable=config.api_key_unreadable,
+            provider_id=config.provider_id,
         )
     return config
+
+
+def _with_requested_reasoning_effort(config, client_metadata):
+    """Apply a validated, request-scoped reasoning setting without persisting it."""
+    if not isinstance(client_metadata, dict):
+        return config
+    reasoning_effort = client_metadata.get("reasoning_effort")
+    if not isinstance(reasoning_effort, str) or reasoning_effort not in _REASONING_EFFORTS:
+        return config
+    generation = dict(config.generation)
+    generation["reasoning_effort"] = reasoning_effort
+    return replace(config, generation=generation)
 
 
 def _recover_missing_options(client, messages, narrative, stop_event=None):
@@ -329,6 +344,7 @@ def _stream_ai_reply(
     config = effective_config
     if not isinstance(config, EffectiveAIConfig):
         raise TypeError("_stream_ai_reply requires EffectiveAIConfig")
+    config = _with_requested_reasoning_effort(config, client_metadata)
     if config.api_key_unreadable:
         yield sse(
             "error",

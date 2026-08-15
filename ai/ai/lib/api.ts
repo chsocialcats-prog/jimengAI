@@ -29,6 +29,30 @@ export type AuthSession = {
   legacy_claim_pending?: boolean
 }
 
+export type DailyCheckinStatus = {
+  date: string
+  checked_in: boolean
+  checked_in_at: string | null
+  fortune: DailyFortune | null
+  streak_days: number
+  points_awarded: number
+  points_total: number
+  already_checked_in?: boolean
+}
+
+export type DailyFortune = {
+  rank: '大吉' | '中吉' | '小吉' | '平'
+  verse: string
+  lucky_color: string
+  do: string
+  avoid: string
+}
+
+export type WebAssistantMessage = {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export type ReplyTemplate = {
   id: string
   name: string
@@ -69,6 +93,24 @@ export type RoleCard = {
   created_at: string
   updated_at: string
   referencing_works?: Array<{ id: number; title: string }>
+}
+
+export type OnlineImageCandidate = {
+  image_url: string
+  thumbnail_url: string
+  page_url: string
+  title: string
+  source: string
+}
+
+export type OnlineImageSearch = {
+  query: string
+  items: OnlineImageCandidate[]
+}
+
+export type MissingCardImageFill = {
+  updated: Array<{ id: number; name: string; image_url: string }>
+  failed: Array<{ id: number; name: string; error: string }>
 }
 
 export type WorldbookEntry = {
@@ -175,6 +217,8 @@ export type RollResult = {
 export type Settings = {
   api_key_set?: boolean
   api_key_unreadable?: boolean
+  active_provider_id?: string
+  providers?: ModelProvider[]
   deepseek?: {
     base_url?: string
     model?: string
@@ -191,6 +235,43 @@ export type Settings = {
     compression_keep_recent_messages?: number
     compression_summary_max_tokens?: number
   }
+}
+
+export type ModelProvider = {
+  provider_id: string
+  display_name: string
+  base_url: string
+  protocol: 'openai-completions'
+  model: string
+  models: string[]
+  timeout_seconds: number
+  is_active: boolean
+  is_custom: boolean
+  removable: boolean
+  api_key_set: boolean
+  api_key_unreadable: boolean
+}
+
+export type ProviderCatalogItem = {
+  provider_id: string
+  display_name: string
+  base_url: string
+  protocol: 'openai-completions'
+  model: string
+  is_custom: false
+}
+
+export type ProviderDraft = {
+  provider_id: string
+  display_name: string
+  base_url: string
+  protocol: 'openai-completions'
+  model: string
+  models: string[]
+  timeout_seconds: number
+  api_key?: string
+  clear_api_key?: boolean
+  activate?: boolean
 }
 
 type Paginated<T> = {
@@ -232,7 +313,7 @@ function toApiError(body: unknown, status: number) {
       {
         status,
         code: typeof error?.code === 'string' ? error.code : 'api_error',
-        details: error?.details,
+        details: error?.details ?? error,
       },
     )
   }
@@ -291,6 +372,29 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     csrfToken = null
     await refreshCsrf()
     return request<T>(path, { ...options, retryCsrf: false })
+  }
+  throw error
+}
+
+async function requestImage(path: string, body: unknown): Promise<Blob> {
+  if (!csrfToken) await refreshCsrf()
+  const response = await fetch(path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      Accept: 'image/*,application/json',
+      'Content-Type': 'application/json',
+      ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+    },
+    body: JSON.stringify(body),
+  })
+  if (response.ok) return response.blob()
+  const parsed = await parseBody(response)
+  const error = toApiError(parsed, response.status)
+  if (error.code === 'csrf_failed') {
+    csrfToken = null
+    await refreshCsrf()
+    return requestImage(path, body)
   }
   throw error
 }
@@ -410,11 +514,15 @@ export const api = {
   logout: () => request<null>('/api/auth/logout', { method: 'POST' }),
   changePassword: (currentPassword: string, newPassword: string) => request<AuthSession>('/api/auth/password', { method: 'PUT', body: { current_password: currentPassword, new_password: newPassword } }),
   updateProfile: (payload: { avatar_url: string }) => request<AuthSession>('/api/auth/profile', { method: 'PUT', body: payload }),
+  getDailyCheckin: () => request<DailyCheckinStatus>('/api/daily-checkin'),
+  checkIn: () => request<DailyCheckinStatus>('/api/daily-checkin', { method: 'POST' }),
+  chatWithAssistant: (messages: WebAssistantMessage[], pagePath = '') => request<{ message: string; mock: boolean }>('/api/assistant/chat', { method: 'POST', body: { messages, page_path: pagePath } }),
   uploadImage: (file: File) => request<UploadedImage>('/api/uploads/images', {
     method: 'POST',
     body: file,
     headers: { 'Content-Type': file.type || 'application/octet-stream' },
   }),
+  loadSearchImage: (url: string) => requestImage('/api/uploads/search-image', { url }),
 
   listWorks: (query = '', tag = '') => listAll<Work>('/api/works', { q: query, tag }),
   getWork: (id: number) => request<Work>(`/api/works/${id}`),
@@ -427,6 +535,8 @@ export const api = {
   createCard: (payload: Partial<RoleCard> & { name: string }) => request<RoleCard>('/api/cards', { method: 'POST', body: payload }),
   updateCard: (id: number, payload: Partial<RoleCard>) => request<RoleCard>(`/api/cards/${id}`, { method: 'PUT', body: payload }),
   deleteCard: (id: number) => request<null>(`/api/cards/${id}`, { method: 'DELETE' }),
+  searchCardImages: (name: string) => request<OnlineImageSearch>('/api/cards/image-candidates', { method: 'POST', body: { name } }),
+  fillMissingCardImages: () => request<MissingCardImageFill>('/api/cards/fill-missing-images', { method: 'POST' }),
   importCardText: (text: string) => request<{ card: RoleCard; worldbook: Worldbook; work: Work }>('/api/imports/card-text', { method: 'POST', body: { text } }),
 
   listWorldbooks: () => listAll<Worldbook>('/api/worldbooks'),
@@ -439,6 +549,7 @@ export const api = {
   deleteWorldbookEntry: (worldbookId: number, entryId: number) => request<null>(`/api/worldbooks/${worldbookId}/entries/${entryId}`, { method: 'DELETE' }),
 
   listConversations: (workId?: number) => listAll<Conversation>('/api/conversations', { work_id: workId }),
+  deleteAllConversations: () => request<{ deleted: number }>('/api/conversations', { method: 'DELETE' }),
   getConversation: (id: number) => request<Conversation>(`/api/conversations/${id}`),
   createConversation: (workId: number, title: string) => request<Conversation>('/api/conversations', { method: 'POST', body: { work_id: workId, title } }),
   updateConversation: (id: number, title: string) => request<Conversation>(`/api/conversations/${id}`, { method: 'PUT', body: { title } }),
@@ -460,5 +571,11 @@ export const api = {
 
   getSettings: () => request<Settings>('/api/config'),
   saveSettings: (settings: Settings) => request<Settings>('/api/config', { method: 'PUT', body: settings }),
-  previewModels: (payload: { base_url?: string; api_key?: string; timeout_seconds?: number }) => request<{ models?: string[]; items?: Array<string | { id?: string }> }>('/api/models/preview', { method: 'POST', body: payload }),
+  previewModels: (payload: { provider_id?: string; base_url?: string; api_key?: string; timeout_seconds?: number }) => request<{ models?: string[]; items?: Array<string | { id?: string }> }>('/api/models/preview', { method: 'POST', body: payload }),
+  listProviderCatalog: () => request<{ items: ProviderCatalogItem[] }>('/api/providers/catalog'),
+  listProviders: () => request<{ items: ModelProvider[] }>('/api/providers'),
+  createProvider: (payload: ProviderDraft) => request<ModelProvider>('/api/providers', { method: 'POST', body: payload }),
+  updateProvider: (providerId: string, payload: Partial<Omit<ProviderDraft, 'provider_id'>>) => request<ModelProvider>(`/api/providers/${encodeURIComponent(providerId)}`, { method: 'PUT', body: payload }),
+  activateProvider: (providerId: string) => request<ModelProvider>(`/api/providers/${encodeURIComponent(providerId)}/activate`, { method: 'POST' }),
+  deleteProvider: (providerId: string) => request<null>(`/api/providers/${encodeURIComponent(providerId)}`, { method: 'DELETE' }),
 }

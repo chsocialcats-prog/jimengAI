@@ -5524,3 +5524,298 @@ body #waifu-tips {
     padding-left: 16px;
   }
 }
+
+/* Resource details use document-like sections so long setting text remains easy to scan. */
+.resource-detail-content {
+  width: min(100%, 980px);
+}
+
+.resource-detail-head {
+  align-items: flex-end;
+}
+
+.resource-detail-owner {
+  margin: 8px 0 0;
+  color: var(--faint);
+  font-family: var(--story-mono);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.resource-detail-overview {
+  margin: 0;
+  padding: 22px 0 24px 22px;
+  border-left: 3px solid var(--accent);
+}
+
+.resource-detail-label {
+  margin: 0 0 7px;
+  color: var(--faint);
+  font-family: var(--story-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.resource-detail-lede {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--text);
+  font-family: var(--story-display);
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1.7;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.resource-detail-section {
+  padding: 28px 0;
+  border-top: 1px solid var(--line);
+}
+
+.resource-detail-overview + .resource-detail-section {
+  border-top: 0;
+}
+
+.resource-detail-section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.resource-detail-section-head .resource-detail-label {
+  margin-bottom: 5px;
+}
+
+.resource-detail-section h2 {
+  margin: 0;
+  font-family: var(--story-display);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.resource-detail-count {
+  flex: 0 0 auto;
+  color: var(--faint);
+  font-family: var(--story-mono);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.resource-detail-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 28px;
+  max-width: 860px;
+  margin: 0;
+}
+
+.resource-detail-facts > div {
+  min-width: 0;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+
+.resource-detail-facts > div:nth-child(-n + 2) {
+  border-top: 0;
+}
+
+.resource-detail-facts dt {
+  margin: 0 0 5px;
+  color: var(--faint);
+  font-family: var(--story-mono);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.resource-detail-facts dd {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.72;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.resource-detail-list {
+  display: grid;
+  gap: 9px;
+  max-width: 860px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: detail-list;
+}
+
+.resource-detail-list li {
+  position: relative;
+  padding: 10px 0 10px 30px;
+  border-top: 1px solid var(--line);
+  color: var(--text);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.resource-detail-list li::before {
+  content: counter(detail-list, decimal-leading-zero);
+  counter-increment: detail-list;
+  position: absolute;
+  top: 11px;
+  left: 0;
+  color: var(--faint);
+  font-family: var(--story-mono);
+  font-size: 10px;
+}
+
+.resource-detail-empty {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.role-card-resource {
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.role-card-resource:hover,
+.role-card-resource:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
+  background: color-mix(in srgb, var(--accent) 4%, var(--panel));
+  outline: none;
+}
+
+.role-card-resource:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.worldbook-detail-entry-list {
+  gap: 12px;
+}
+
+.worldbook-detail-entry {
+  gap: 13px;
+  padding: 18px 20px;
+  border-left: 3px solid color-mix(in srgb, var(--accent) 48%, var(--line));
+  background: color-mix(in srgb, var(--panel-2) 82%, var(--panel));
+}
+
+.worldbook-detail-entry .entry-card-header {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.worldbook-detail-entry h2 {
+  min-width: 0;
+  margin: 0;
+  font-family: var(--story-display);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.worldbook-detail-entry .tag-list {
+  justify-content: flex-end;
+}
+
+.worldbook-entry-content {
+  max-width: 78ch;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.8;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  /* Keep the resource breakpoint aligned with the final mobile shell rules. */
+  .app-shell {
+    display: block;
+    padding-left: 0;
+  }
+
+  .workspace-collapsed.app-shell {
+    display: block;
+    padding-left: 0;
+  }
+
+  .topbar {
+    height: auto;
+    min-height: 62px;
+    padding: 10px 16px;
+  }
+
+  .top-actions {
+    grid-column: 2;
+  }
+
+  .topbar-search {
+    position: static;
+    grid-column: 1 / -1;
+    width: 100%;
+    transform: none;
+  }
+
+  .resource-detail-head {
+    align-items: flex-start;
+  }
+
+  .resource-detail-head .detail-actions {
+    width: 100%;
+  }
+
+  .resource-detail-head .detail-actions .btn {
+    flex: 1 1 160px;
+  }
+
+  .resource-detail-overview {
+    padding: 18px 0 20px 16px;
+  }
+
+  .resource-detail-lede {
+    font-size: 18px;
+    line-height: 1.65;
+  }
+
+  .resource-detail-section {
+    padding: 22px 0;
+  }
+
+  .resource-detail-section-head {
+    align-items: flex-start;
+  }
+
+  .resource-detail-section h2 {
+    font-size: 20px;
+  }
+
+  .resource-detail-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .resource-detail-facts > div:nth-child(-n + 2) {
+    border-top: 1px solid var(--line);
+  }
+
+  .resource-detail-facts > div:first-child {
+    border-top: 0;
+  }
+
+  .worldbook-detail-entry {
+    padding: 16px;
+  }
+
+  .worldbook-detail-entry .entry-card-header {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .worldbook-detail-entry .tag-list {
+    justify-content: flex-start;
+  }
+}

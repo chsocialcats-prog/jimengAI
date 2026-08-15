@@ -31,13 +31,15 @@ test("main module has no transport or offline data-store implementation", () => 
   assert.match(mainJs, /from "\.\/data\.mjs"/);
 });
 
-test("role-card routes distinguish the library, new editor, and existing editor", () => {
+test("role-card routes distinguish the library, detail view, new editor, and existing editor", () => {
   assert.match(mainJs, /if \(name === "cards"\) return \{ name: "cards" \};/);
   assert.match(mainJs, /if \(name === "card" && id === "new"\) return \{ name: "card", id: null \};/);
+  assert.match(mainJs, /if \(name === "card" && id && hash\.endsWith\("\/detail"\)\) return \{ name: "card-detail", id: Number\(id\) \};/);
   assert.match(mainJs, /if \(name === "card" && id\) return \{ name: "card", id: Number\(id\) \};/);
   assert.match(mainJs, /current\.name === "cards"\s*\|\|\s*current\.name === "card"/);
   assert.match(mainJs, /current\.name === "cards"\) await renderCards\(\)/);
   assert.match(mainJs, /current\.name === "card"\) await renderCardEditor\(current\.id\)/);
+  assert.match(mainJs, /current\.name === "card-detail"\) await renderCardDetail\(current\.id\)/);
 });
 
 test("script saves keep ordered role-card references without synchronizing card content", () => {
@@ -107,6 +109,20 @@ test("role-card cards show source and a personality-first summary", () => {
   const results = mainJs.slice(resultsStart, bindingsStart);
   assert.match(results, /esc\(cardPersonalitySummary\(card\)\)/);
   assert.match(results, /来源：\$\{esc\(card\.source \|\| "未标注来源"\)\}/);
+  assert.match(results, /data-card-open="\$\{Number\(card\.id\)\}"/);
+});
+
+test("role-card detail groups role text, directives, attributes, and relationships for reading", () => {
+  assert.match(mainJs, /async function renderCardDetail\(cardId\)/);
+  assert.match(mainJs, /function roleCardDefinitionHtml\(fields\)/);
+  assert.match(mainJs, /function roleCardListHtml\(items\)/);
+  const detailStart = mainJs.indexOf("async function renderCardDetail");
+  const libraryStart = mainJs.indexOf("async function renderCards", detailStart);
+  const detail = mainJs.slice(detailStart, libraryStart);
+  for (const label of ["角色设定", "角色特征", "固定指令", "角色属性", "文字关系"]) {
+    assert.match(detail, new RegExp(label));
+  }
+  assert.match(detail, /card-detail-edit/);
 });
 
 test("script editor manages existing role cards and submits ordered ids", () => {

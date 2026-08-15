@@ -47,7 +47,47 @@ export async function renderWorldbookDetail(appEl, { apiClient, adapter, worldbo
   if (!book) throw new Error("世界书不存在");
   const entries = adapter?.isReadOnly ? book.entries || [] : itemsOf(await apiClient.get(`/api/worldbooks/${encodeURIComponent(worldbookId)}/entries?page=1&page_size=100`));
   const canEdit = projectOwnership(book).canEdit && !adapter?.isReadOnly && !unavailable;
-  appEl.innerHTML = `<div class="page worldbook-detail-page"><div class="page-head"><div><p class="story-kicker">WORLD BOOK</p><h1 class="page-title" tabindex="-1">${esc(book.title || book.name)}</h1>${ownerHtml(book)}</div><div class="detail-actions"><button class="btn btn-ghost" id="worldbook-back" type="button">返回世界书</button>${canEdit ? `<button class="btn btn-primary" id="worldbook-edit" type="button">${icon("edit")} 编辑</button>` : ""}</div></div>${!canEdit ? `<p class="notice">${esc(projectOwnership(book).readOnlyReason || "当前为只读内容")}</p>` : ""}<section class="panel"><div class="panel-body section"><p class="detail-description">${esc(book.description || "暂无描述")}</p><div class="entry-list">${entries.length ? entries.map((entry) => `<article class="entry-card"><div class="entry-card-header"><strong>${esc(entry.title || "条目")}</strong><span class="tag">${esc((entry.keywords || []).join("、"))}</span></div><p>${esc(entry.content || "")}</p></article>`).join("") : "<p>暂无条目</p>"}</div></div></section></div>`;
+  const ownership = ownershipMeta(book);
+  const entryHtml = entries.length
+    ? entries.map((entry) => {
+      const keywords = Array.isArray(entry.keywords) ? entry.keywords.filter(Boolean) : [];
+      return `<article class="entry-card worldbook-detail-entry">
+        <div class="entry-card-header">
+          <h2>${esc(entry.title || "未命名条目")}</h2>
+          ${keywords.length ? `<div class="tag-list">${keywords.map((keyword) => `<span class="tag">${esc(keyword)}</span>`).join("")}</div>` : ""}
+        </div>
+        <p class="worldbook-entry-content">${esc(entry.content || "")}</p>
+      </article>`;
+    }).join("")
+    : "<p class=\"resource-detail-empty\">尚未添加世界书条目。</p>";
+  appEl.innerHTML = `
+    <div class="page worldbook-detail-page resource-detail-page">
+      <div class="page-head resource-detail-head">
+        <div>
+          <p class="story-kicker">WORLD BOOK</p>
+          <h1 class="page-title" tabindex="-1">${esc(book.title || book.name || "未命名世界书")}</h1>
+          <p class="resource-detail-owner">${esc(ownership.ownerLabel)}${canEdit ? " · 我的世界书" : " · 只读内容"}</p>
+        </div>
+        <div class="detail-actions">
+          <button class="btn btn-ghost" id="worldbook-back" type="button">${icon("arrow-left")} 返回世界书</button>
+          ${canEdit ? `<button class="btn btn-primary" id="worldbook-edit" type="button">${icon("edit")} 编辑世界书</button>` : ""}
+        </div>
+      </div>
+      ${!canEdit ? `<p class="notice">${esc(projectOwnership(book).readOnlyReason || "当前为只读内容")}</p>` : ""}
+      <main class="resource-detail-content">
+        <section class="resource-detail-overview" aria-labelledby="worldbook-overview-title">
+          <p class="resource-detail-label">世界观概览</p>
+          <p class="resource-detail-lede" id="worldbook-overview-title">${esc(book.description || "尚未填写世界书简介。")}</p>
+        </section>
+        <section class="resource-detail-section" aria-labelledby="worldbook-entries-title">
+          <div class="resource-detail-section-head">
+            <div><p class="resource-detail-label">设定索引</p><h2 id="worldbook-entries-title">世界书条目</h2></div>
+            <span class="resource-detail-count">${entries.length} 条</span>
+          </div>
+          <div class="entry-list worldbook-detail-entry-list">${entryHtml}</div>
+        </section>
+      </main>
+    </div>`;
   appEl.querySelector("#worldbook-back")?.addEventListener("click", () => navigate("#/worldbooks"));
   appEl.querySelector("#worldbook-edit")?.addEventListener("click", () => navigate(`#/worldbook/${encodeURIComponent(worldbookId)}/edit`));
   return { book, entries };

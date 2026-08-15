@@ -240,6 +240,7 @@ function parseRoute() {
   if (name === "worldbook" && id) return { name: "worldbook", id, edit: hash.endsWith("/edit") };
   if (name === "login" || name === "register") return { name };
   if (name === "card" && id === "new") return { name: "card", id: null };
+  if (name === "card" && id && hash.endsWith("/detail")) return { name: "card-detail", id: Number(id) };
   if (name === "card" && id) return { name: "card", id: Number(id) };
   if (name === "creator") return { name: "creator", id: id ? Number(id) : null };
   if (name === "settings") return { name: "settings", section: id === "profile" ? "profile" : "api" };
@@ -318,7 +319,7 @@ async function route() {
   document.querySelectorAll(".nav-links a").forEach((link) => {
     const nav = link.dataset.nav || "";
     const active = (nav === "library" && current.name === "library")
-      || (nav === "cards" && (current.name === "cards" || current.name === "card"))
+      || (nav === "cards" && (current.name === "cards" || current.name === "card" || current.name === "card-detail"))
       || (nav === "worldbooks" && (current.name === "worldbooks" || current.name === "worldbook"))
       || nav === current.name;
     link.classList.toggle("active", active);
@@ -338,6 +339,7 @@ async function route() {
       }
     }
     else if (current.name === "card") await renderCardEditor(current.id);
+    else if (current.name === "card-detail") await renderCardDetail(current.id);
     else if (current.name === "creator") await renderCreator(current.id);
     else if (current.name === "settings") {
       const authSnapshot = authState.getSnapshot();
@@ -854,6 +856,85 @@ function showCardReferenceModal(references, message = "角色卡正在被剧本�
   `);
 }
 
+function roleCardDetailValue(value) {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean).join("、");
+  if (value && typeof value === "object") {
+    return Object.entries(value)
+      .map(([key, item]) => `${key}：${roleCardDetailValue(item)}`)
+      .join("；");
+  }
+  return String(value ?? "").trim();
+}
+
+function roleCardDefinitionHtml(fields) {
+  const rows = fields
+    .map(([label, value]) => [label, roleCardDetailValue(value)])
+    .filter(([, value]) => value);
+  if (!rows.length) return "";
+  return `<dl class="resource-detail-facts">${rows.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join("")}</dl>`;
+}
+
+function roleCardListHtml(items) {
+  const values = Array.isArray(items) ? items.map(roleCardDetailValue).filter(Boolean) : [];
+  if (!values.length) return "";
+  return `<ol class="resource-detail-list">${values.map((item) => `<li>${esc(item)}</li>`).join("")}</ol>`;
+}
+
+async function renderCardDetail(cardId) {
+  let card;
+  try {
+    card = await getCard(cardId);
+  } catch (error) {
+    toast(error.message || "无法加载角色卡", "error");
+    navigate("#/cards");
+    return;
+  }
+  if (!card) {
+    toast("角色卡不存在", "error");
+    navigate("#/cards");
+    return;
+  }
+
+  const ownership = projectOwnership(card);
+  const characterAttributes = roleCardDefinitionHtml(Object.entries(card.character_attributes || {}));
+  const relationships = roleCardDefinitionHtml(Object.entries(card.relationships || {}));
+  const directives = roleCardListHtml(card.directives);
+  appEl.innerHTML = `
+    <div class="page resource-detail-page role-card-detail-page">
+      <div class="page-head resource-detail-head">
+        <div>
+          <p class="story-kicker">CHARACTER CARD</p>
+          <h1 class="page-title" tabindex="-1">${esc(card.name || "未命名角色")}</h1>
+          <p class="resource-detail-owner">${esc(ownership.ownerLabel)}${ownership.canEdit ? " · 我的角色卡" : " · 只读内容"}</p>
+        </div>
+        <div class="detail-actions">
+          <button class="btn btn-ghost" id="card-detail-back" type="button">${icon("arrow-left")} 返回角色卡库</button>
+          ${ownership.canEdit ? `<button class="btn btn-primary" id="card-detail-edit" type="button">${icon("edit")} 编辑角色卡</button>` : ""}
+        </div>
+      </div>
+      ${!ownership.canEdit ? `<p class="notice">${esc(ownership.readOnlyReason || "当前为只读内容")}</p>` : ""}
+      <main class="resource-detail-content">
+        <section class="resource-detail-overview" aria-labelledby="card-overview-title">
+          <p class="resource-detail-label">角色设定</p>
+          <p class="resource-detail-lede" id="card-overview-title">${esc(card.persona || "尚未填写人设简介。")}</p>
+        </section>
+        <section class="resource-detail-section" aria-labelledby="card-profile-title">
+          <div class="resource-detail-section-head"><p class="resource-detail-label">人物侧写</p><h2 id="card-profile-title">角色特征</h2></div>
+          ${roleCardDefinitionHtml([
+            ["性格", card.personality],
+            ["语气与口头禅", card.speaking_style],
+            ["来源", card.source],
+          ]) || "<p class=\"resource-detail-empty\">尚未补充性格、语气或来源信息。</p>"}
+        </section>
+        ${directives ? `<section class="resource-detail-section" aria-labelledby="card-directives-title"><div class="resource-detail-section-head"><p class="resource-detail-label">行为边界</p><h2 id="card-directives-title">固定指令</h2></div>${directives}</section>` : ""}
+        ${characterAttributes ? `<section class="resource-detail-section" aria-labelledby="card-attributes-title"><div class="resource-detail-section-head"><p class="resource-detail-label">剧情数据</p><h2 id="card-attributes-title">角色属性</h2></div>${characterAttributes}</section>` : ""}
+        ${relationships ? `<section class="resource-detail-section" aria-labelledby="card-relations-title"><div class="resource-detail-section-head"><p class="resource-detail-label">人物网络</p><h2 id="card-relations-title">文字关系</h2></div>${relationships}</section>` : ""}
+      </main>
+    </div>`;
+  $("#card-detail-back")?.addEventListener("click", () => navigate("#/cards"));
+  $("#card-detail-edit")?.addEventListener("click", () => navigate(`#/card/${Number(card.id)}`));
+}
+
 async function renderCards() {
   if (!$("#card-library-search")) {
     appEl.innerHTML = `
@@ -883,7 +964,7 @@ async function renderCardResults() {
       const referenceNames = referencedWorkNames(references).join("、");
       const ownership = projectOwnership(card);
       return `
-        <article class="resource-card">
+        <article class="resource-card role-card-resource" data-card-open="${Number(card.id)}" tabindex="0" aria-label="查看角色卡：${esc(card.name || "未命名角色")}">
           <div class="resource-card-body">
             <div class="resource-card-heading">
               <h2>${esc(card.name || "未命名角色")}</h2>
@@ -911,6 +992,18 @@ function bindCardsEvents() {
 }
 
 function bindCardActionEvents(root = document) {
+  root.querySelectorAll("[data-card-open]").forEach((card) => {
+    const openCard = () => navigate(`#/card/${Number(card.dataset.cardOpen)}/detail`);
+    card.addEventListener("click", (event) => {
+      if (!event.target.closest("button, a, input, select, textarea")) openCard();
+    });
+    card.addEventListener("keydown", (event) => {
+      if ((event.key === "Enter" || event.key === " ") && !event.target.closest("button, a, input, select, textarea")) {
+        event.preventDefault();
+        openCard();
+      }
+    });
+  });
   root.querySelectorAll("[data-card-action]").forEach((button) => {
     button.addEventListener("click", async () => {
       const action = button.dataset.cardAction;

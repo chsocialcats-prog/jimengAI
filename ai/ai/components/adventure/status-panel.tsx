@@ -3,11 +3,11 @@
 import { Sparkles, Clock, BookMarked, Brain, ChevronRight, Coins, Backpack, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Progress } from '@/components/ui/progress'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import type { AdventureState, Conversation } from '@/lib/api'
+import type { AdventureState, Conversation, RoleCard } from '@/lib/api'
 
 function SectionTitle({ icon: Icon, children }: { icon: React.ElementType; children: React.ReactNode }) {
   return <div className="flex items-center gap-2 px-1"><Icon className="size-4 text-primary" /><h3 className="text-sm font-semibold text-foreground">{children}</h3></div>
@@ -24,12 +24,23 @@ function progressValue(value: unknown) {
   return Math.max(0, Math.min(100, value))
 }
 
+function isRoleCardSnapshot(value: Conversation['card_snapshot']): value is RoleCard {
+  return typeof (value as Partial<RoleCard>).name === 'string'
+}
+
 export function StatusPanel({ state, conversation }: { state: AdventureState; conversation: Conversation }) {
   const attributes = Object.entries(state.attributes || {})
   const relations = Object.entries(state.relations || {})
   const characters = Object.entries(state.characters || {})
   const logs = (state.logs || []).slice(0, 5)
   const items = Array.isArray(state.items) ? state.items : []
+  const legacyCard = conversation.card_snapshot
+  const cards: RoleCard[] = conversation.card_snapshots.length
+    ? conversation.card_snapshots
+    : (isRoleCardSnapshot(legacyCard) ? [legacyCard] : [])
+  const avatarByCharacterName = new Map(cards
+    .filter((card) => Boolean(card.name?.trim() && card.avatar_url?.trim()))
+    .map((card) => [card.name.trim(), card.avatar_url.trim()]))
 
   return (
     <div className="flex flex-col gap-6 p-4">
@@ -57,7 +68,7 @@ export function StatusPanel({ state, conversation }: { state: AdventureState; co
 
       <section className="flex flex-col gap-3">
         <SectionTitle icon={Users}>关系与角色</SectionTitle>
-        {relations.length || characters.length ? <div className="flex flex-col gap-2 px-1">{relations.map(([name, value]) => <RelationCard key={`relation-${name}`} name={name} detail={`关系值：${displayValue(value)}`} value={typeof value === 'number' ? value : null} />)}{characters.filter(([name]) => !relations.some(([relation]) => relation === name)).map(([name, profile]) => <RelationCard key={`character-${name}`} name={name} detail={Object.entries(profile.attributes || {}).slice(0, 2).map(([key, value]) => `${key} ${displayValue(value)}`).join(' · ') || '已加入故事'} value={null} />)}</div> : <p className="px-1 text-sm text-muted-foreground">尚未记录角色关系。</p>}
+        {relations.length || characters.length ? <div className="flex flex-col gap-2 px-1">{relations.map(([name, value]) => <RelationCard key={`relation-${name}`} name={name} avatarUrl={avatarByCharacterName.get(name.trim())} detail={`关系值：${displayValue(value)}`} value={typeof value === 'number' ? value : null} />)}{characters.filter(([name]) => !relations.some(([relation]) => relation === name)).map(([name, profile]) => <RelationCard key={`character-${name}`} name={name} avatarUrl={avatarByCharacterName.get(name.trim())} detail={Object.entries(profile.attributes || {}).slice(0, 2).map(([key, value]) => `${key} ${displayValue(value)}`).join(' · ') || '已加入故事'} value={null} />)}</div> : <p className="px-1 text-sm text-muted-foreground">尚未记录角色关系。</p>}
       </section>
 
       <Separator />
@@ -75,7 +86,7 @@ export function StatusPanel({ state, conversation }: { state: AdventureState; co
   )
 }
 
-function RelationCard({ name, detail, value }: { name: string; detail: string; value: number | null }) {
+function RelationCard({ name, avatarUrl, detail, value }: { name: string; avatarUrl?: string; detail: string; value: number | null }) {
   const level = value === null ? 0 : Math.max(0, Math.min(5, Math.ceil(Math.abs(value) / 20)))
-  return <div className="flex items-center gap-3 rounded-2xl bg-card p-2.5 shadow-sm"><Avatar className="size-10"><AvatarFallback>{name.slice(0, 1)}</AvatarFallback></Avatar><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-foreground">{name}</p><p className="truncate text-xs text-muted-foreground">{detail}</p></div>{value !== null ? <div className="flex gap-0.5" aria-label={`关系值 ${value}`}>{Array.from({ length: 5 }).map((_, index) => <span key={index} className={cn('size-1.5 rounded-full', index < level ? 'bg-primary' : 'bg-muted')} />)}</div> : <Badge variant="secondary" className="rounded-full text-[10px]">角色</Badge>}</div>
+  return <div className="flex items-center gap-3 rounded-2xl bg-card p-2.5 shadow-sm"><Avatar className="size-10">{avatarUrl && <AvatarImage src={avatarUrl} alt={`${name} 头像`} />}<AvatarFallback>{name.slice(0, 1)}</AvatarFallback></Avatar><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-foreground">{name}</p><p className="truncate text-xs text-muted-foreground">{detail}</p></div>{value !== null ? <div className="flex gap-0.5" aria-label={`关系值 ${value}`}>{Array.from({ length: 5 }).map((_, index) => <span key={index} className={cn('size-1.5 rounded-full', index < level ? 'bg-primary' : 'bg-muted')} />)}</div> : <Badge variant="secondary" className="rounded-full text-[10px]">角色</Badge>}</div>
 }

@@ -20,6 +20,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/c
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { api, type OnboardingField, type Work } from '@/lib/api'
+import { refreshApiStatus } from '@/lib/api-status'
 import { useSession } from '@/components/session-provider'
 import { workCover } from '@/components/library/work-card'
 
@@ -82,14 +83,16 @@ export function StartAdventureDialog({
 
   const createAdventure = async () => {
     if (!work) return
-    if (!session.authenticated) {
+    if (!session.authenticated || !session.user) {
       toast.info('请先登录，再创建自己的冒险存档。')
       close()
       router.push('/login')
       return
     }
+    const userId = session.user.id
     setCreating(true)
     try {
+      void refreshApiStatus(userId)
       const conversation = await api.createConversation(work.id, work.title)
       await api.completeOnboarding(conversation.id, values)
       toast.success('新存档已创建')

@@ -113,3 +113,59 @@ class UserAISettingsTests(unittest.TestCase):
                 {"deepseek": {"api_key": "test-token-new", "clear_api_key": True}},
             )
 
+    def test_multiple_provider_profiles_keep_their_keys_and_active_route_isolated(self):
+        self.service.update_for_user(
+            1,
+            {"deepseek": {"model": "deepseek-chat", "api_key": "deepseek-secret"}},
+        )
+        self.service.create_provider(
+            1,
+            {
+                "provider_id": "openai",
+                "display_name": "OpenAI",
+                "base_url": "https://api.openai.com/v1",
+                "protocol": "openai-completions",
+                "model": "gpt-4o-mini",
+                "models": ["gpt-4o-mini"],
+                "api_key": "openai-secret",
+                "timeout_seconds": 60,
+            },
+        )
+
+        public = self.service.public_for_user(1)
+        active = self.service.resolve_for_user(1)
+        rows = self.connection.execute(
+            "SELECT provider_id, api_key_ciphertext FROM user_ai_providers ORDER BY provider_id"
+        ).fetchall()
+
+        self.assertEqual(active.provider_id, "openai")
+        self.assertEqual(active.api_key, "openai-secret")
+        self.assertEqual([item["provider_id"] for item in public["providers"]], ["openai", "deepseek"])
+        self.assertTrue(all(item["api_key_set"] for item in public["providers"]))
+        self.assertNotIn("openai-secret", " ".join(row["api_key_ciphertext"] for row in rows))
+        self.assertNotIn("deepseek-secret", " ".join(row["api_key_ciphertext"] for row in rows))
+
+        self.service.activate_provider(1, "deepseek")
+        restored = self.service.resolve_for_user(1)
+        self.assertEqual(restored.provider_id, "deepseek")
+        self.assertEqual(restored.api_key, "deepseek-secret")
+
+    def test_delete_active_provider_selects_remaining_default(self):
+        self.service.create_provider(
+            1,
+            {
+                "provider_id": "openai",
+                "display_name": "OpenAI",
+                "base_url": "https://api.openai.com/v1",
+                "protocol": "openai-completions",
+                "model": "gpt-4o-mini",
+                "models": [],
+                "api_key": "openai-secret",
+                "timeout_seconds": 60,
+            },
+        )
+
+        self.service.delete_provider(1, "openai")
+
+        self.assertEqual(self.service.resolve_for_user(1).provider_id, "deepseek")
+        self.assertEqual([item["provider_id"] for item in self.service.list_providers_for_user(1)], ["deepseek"])

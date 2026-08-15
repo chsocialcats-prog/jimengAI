@@ -45,6 +45,12 @@ def list_conversations(
     )
 
 
+@router.delete("")
+def delete_all_conversations(auth: AuthContext = Depends(require_auth)):
+    deleted = conversation_repository.delete_all_conversations(auth.user.id)
+    return {"deleted": deleted}
+
+
 @router.post("", status_code=201)
 def create_conversation(payload: ConversationCreate, auth: AuthContext = Depends(require_auth)):
     conversation = conversation_repository.create_conversation(

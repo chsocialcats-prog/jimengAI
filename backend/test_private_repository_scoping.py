@@ -17,6 +17,7 @@ class PrivateRepositoryScopingTests(unittest.TestCase):
             "update_conversation",
             "set_conversation_status",
             "delete_conversation",
+            "delete_all_conversations",
             "get_messages",
             "create_message",
             "update_message",

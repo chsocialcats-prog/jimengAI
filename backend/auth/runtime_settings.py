@@ -7,6 +7,8 @@ import os
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+from backend.services.provider_catalog import builtin_provider_origins
+
 from .origin import normalize_origin
 
 
@@ -39,7 +41,12 @@ class RuntimeSettings:
         for cidr in cidrs:
             ipaddress.ip_network(cidr)
         https_only = _bool(values.get("NEKO_AI_HTTPS_ONLY"), False)
-        origins = tuple(item.strip() for item in values.get("NEKO_AI_ALLOWED_ORIGINS", "https://api.deepseek.com").split(",") if item.strip())
+        configured_origins = values.get("NEKO_AI_ALLOWED_ORIGINS")
+        origins = (
+            tuple(item.strip() for item in configured_origins.split(",") if item.strip())
+            if configured_origins
+            else builtin_provider_origins()
+        )
         normalized = tuple(normalize_origin(item) for item in origins)
         if not normalized or any(item is None for item in normalized) or (https_only and any(not item.startswith("https://") for item in normalized)):
             raise ValueError("invalid AI allowed origins")
