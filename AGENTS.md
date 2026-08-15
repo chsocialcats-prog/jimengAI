@@ -10,10 +10,10 @@ When a DeepSeek-compatible API key is configured, chat uses the OpenAI-compatibl
 
 - Backend: Python, FastAPI and Uvicorn.
 - Database: SQLite at `data/app.db`, initialized and migrated by `backend/database.py`.
-- Frontend: plain `frontend/index.html`, `frontend/css/style.css` and `frontend/js/main.js`; there is no build step or package manifest.
+- Frontend: Next.js static export. Source lives in `frontend/app/`, `frontend/components/` and `frontend/lib/`; the runtime files are generated into `frontend/out/`.
 - AI: standard-library HTTP client for DeepSeek/OpenAI-compatible `/models` and `/chat/completions` endpoints.
-- Streaming: SSE events handled by `backend/routers/chat_routes.py` and `frontend/js/main.js`.
-- Tests: Python `unittest` files under `backend/` and Node `node:test` files under `frontend/`.
+- Streaming: SSE events handled by `backend/routers/chat_routes.py` and `frontend/lib/api.ts`.
+- Tests: Python `unittest` files under `backend/`, plus frontend TypeScript checks and a production static export.
 
 The application is intentionally single-process. Conversation-generation locks and stop events live in the FastAPI process, so do not run Uvicorn with multiple workers.
 
@@ -37,8 +37,9 @@ The application is intentionally single-process. Conversation-generation locks a
 - `backend/services/state_service.py`: state normalization, merge rules and player-visible change text.
 - `backend/services/reply_length.py`: per-turn reply-length presets and limits.
 - `backend/ai/deepseek_client.py`: model discovery, real streaming client and mock client.
-- `frontend/js/main.js`: hash-routed SPA, API/SSE client, offline data and all page controllers.
-- `frontend/css/style.css`: responsive UI and theme styling.
+- `frontend/lib/api.ts`: API, CSRF and SSE client.
+- `frontend/components/`: page views, adventure controls and shared UI.
+- `frontend/out/`: static export served by FastAPI; regenerate it with `pnpm build` after frontend source changes.
 - `docs/superpowers/specs/` and `docs/superpowers/plans/`: feature designs and implementation plans.
 
 ## Setup and commands
@@ -56,11 +57,13 @@ Run all backend tests:
 python -m unittest discover -s backend -p 'test_*.py'
 ```
 
-Run all frontend tests:
+Run frontend checks:
 
 ```powershell
-$testFiles = Get-ChildItem -Path frontend -Filter 'test_*.mjs' | ForEach-Object { $_.FullName }
-node --test $testFiles
+Push-Location frontend
+pnpm exec tsc --noEmit
+pnpm build
+Pop-Location
 ```
 
 For narrow changes, run the directly related test file first, then run both complete suites before reporting a cross-layer change as complete. `backend/smoke_test.py` expects a running server and complements rather than replaces the unit suites.
@@ -78,7 +81,7 @@ For narrow changes, run the directly related test file first, then run both comp
 - Make the smallest scoped change. Do not perform unrelated refactors or bulk formatting.
 - `config.json` is tracked local configuration and may contain a real API key. Never print, copy, expose or commit its secret value. Prefer the `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL` and `DEEPSEEK_MODEL` environment variables.
 - Never edit or commit `data/app.db`; it is ignored runtime data. Tests should use their existing temporary databases and fixtures.
-- Do not casually modify `frontend/vendor/` or bundled Live2D models. If a task explicitly requires it, preserve paths and verify source/licence information in `frontend/vendor/live2d-models/SOURCE.md`.
+- Do not casually modify tracked static assets under `frontend/public/` or `frontend/out/`. When a task explicitly requires it, preserve paths and verify source/licence information before replacing bundled assets.
 - Do not change the server to multi-worker operation without redesigning per-conversation exclusivity and stop-event storage.
 - When editing a role card, work or conversation model, inspect both online repository behavior and frontend offline/mock migration behavior.
 - When changing SSE generation, verify stop handling, exclusivity, partial-message persistence, structured-output filtering, state events and autosave behavior.

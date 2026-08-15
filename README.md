@@ -1,6 +1,6 @@
 # AI 对话冒险平台
 
-本地优先的多账号中文 AI 文字冒险应用。后端使用 FastAPI、Uvicorn 和 SQLite，前端是无构建步骤的 HTML/CSS/ES module。配置 DeepSeek 兼容 API 后使用真实流式生成；未配置密钥时使用确定性的 mock 回复，前端在后端不可用时也保留离线演示数据。
+本地优先的多账号中文 AI 文字冒险应用。后端使用 FastAPI、Uvicorn 和 SQLite，前端是静态导出的 Next.js 应用。配置 DeepSeek 兼容 API 后使用真实流式生成；未配置密钥时使用确定性的 mock 回复。
 
 账号之间严格隔离会话、消息、状态、快照、分支和个人 AI 设置。角色卡、世界书和作品是可发现的公共资源，但只有所有者可以创建、修改和删除；列表和详情会返回 `owner_username` 与 `can_edit`，用于区分可读和可写权限。
 
@@ -64,9 +64,12 @@ backend/
 ├── schemas.py             API 请求模型
 └── smoke_test.py          运行中服务的后端冒烟测试
 frontend/
-├── index.html             应用壳和静态资源入口
-├── css/style.css          页面样式
-└── js/                    hash 路由、数据层、页面模块和聊天模块
+├── app/                   Next 路由和全局样式
+├── components/            页面视图与通用 UI 组件
+├── lib/                   API、会话和前端状态工具
+├── public/                公开静态资源
+├── out/                   由 Next 导出的运行时静态文件
+└── package.json           前端构建脚本与依赖
 docs/
 ├── api-contract.md        SSE 与兼容语义 notes
 ├── superpowers/baselines/ 清理前行为基线
@@ -82,11 +85,13 @@ start.py                   Windows 启动器
 python -m unittest discover -s backend -p 'test_*.py'
 ```
 
-完整前端测试：
+前端类型检查与静态导出：
 
 ```powershell
-$testFiles = Get-ChildItem -Path frontend -Filter 'test_*.mjs' | ForEach-Object { $_.FullName }
-node --test $testFiles
+Push-Location frontend
+pnpm exec tsc --noEmit
+pnpm build
+Pop-Location
 ```
 
 启动服务后可运行后端冒烟测试：

@@ -46,14 +46,14 @@ from .routers import (
 from .services.image_uploads import UPLOAD_DIR
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
-LEGACY_FRONTEND_DIR = PROJECT_DIR / "frontend"
-NEXT_FRONTEND_DIR = PROJECT_DIR / "ai" / "ai" / "out"
-# The imported React UI is statically exported into ai/ai/out. Keep the legacy
-# static application as a startup-safe fallback until that build is available.
+FRONTEND_SOURCE_DIR = PROJECT_DIR / "frontend"
+NEXT_FRONTEND_DIR = FRONTEND_SOURCE_DIR / "out"
+# The Next UI is statically exported into frontend/out. Falling back to the
+# source directory preserves a clear startup failure page if the export is absent.
 FRONTEND_DIR = (
     NEXT_FRONTEND_DIR
     if (NEXT_FRONTEND_DIR / "index.html").is_file()
-    else LEGACY_FRONTEND_DIR
+    else FRONTEND_SOURCE_DIR
 )
 logger = logging.getLogger(__name__)
 
