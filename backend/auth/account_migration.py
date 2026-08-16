@@ -12,7 +12,7 @@ from pathlib import Path
 from backend.config import CONFIG_PATH, clear_legacy_config_api_key
 
 from .legacy_config import load_legacy_config
-from .types import PublicUser
+from .types import DEFAULT_ACCOUNT_AVATAR_URL, PublicUser
 
 _STATE_KEY = "account_migration_state"
 
@@ -56,11 +56,11 @@ class AccountMigrationService:
             if state not in {"unclaimed", "complete"}:
                 raise MigrationPending()
             cursor = self.connection.execute(
-                """INSERT INTO users (username, username_key, password_hash, is_active,
-                   password_changed_at, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?, ?)""",
-                (username, username_key, password_hash, now, now, now),
+                """INSERT INTO users (username, username_key, password_hash, is_active, avatar_url,
+                   password_changed_at, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?, ?, ?)""",
+                (username, username_key, password_hash, DEFAULT_ACCOUNT_AVATAR_URL, now, now, now),
             )
-            user = PublicUser(cursor.lastrowid, username, now)
+            user = PublicUser(cursor.lastrowid, username, now, DEFAULT_ACCOUNT_AVATAR_URL)
             if state == "unclaimed":
                 for table, owner_column in (("cards", "owner_user_id"), ("worldbooks", "owner_user_id"), ("works", "owner_user_id"), ("conversations", "user_id")):
                     self.connection.execute(f"UPDATE {table} SET {owner_column} = ? WHERE {owner_column} IS NULL", (user.id,))

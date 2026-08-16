@@ -2,15 +2,29 @@
 
 ## Adventure workspace
 
-`/adventure` is a single conversation workspace inside `AppShell`.
+Source: `frontend/components/adventure/adventure-view.tsx`
 
-- Main column: story header, message timeline, composer fixed to the lower portion of the available reading column.
-- Composer: vertically stacked textarea and action row within one bordered rounded input surface.
-- Action row: left side holds correction and reply-length controls; right side holds model/reasoning selector, then stop or send. On narrow screens the model control may take a full trailing row but the send button remains anchored at the logical end.
-- Model panel: an anchored, small-width popover above the selector. It has two compact preference rows, not nested cards: current model and reasoning intensity. Expanding a row reveals its choices in-place.
+`/adventure` is a full-height two-column conversation workspace. The content column holds a compact header, scrollable story timeline, and lower composer. The status area is the only desktop sidebar.
 
-## Responsive constraints
+```tsx
+<div className="flex min-h-0 flex-1">
+  <div className="flex min-w-0 flex-1 flex-col">{/* timeline and composer */}</div>
+  {panelOpen && <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-border/60 bg-secondary/30 lg:block xl:w-96"><StatusPanel state={state} conversation={conversation} /></aside>}
+</div>
+```
 
-- Preserve the textarea's usable width; model naming must use `truncate` and a stable maximum width.
-- The popover aligns to the trailing composer edge where possible and stays within the viewport.
-- Each option row uses a fixed icon column, wrapping text label, and a trailing selected indicator.
+## Mobile status drawer
+
+The header exposes the exact same panel below `lg`; it is a right-side sheet, not a second implementation.
+
+```tsx
+<Sheet>
+  <SheetTrigger render={<Button variant="outline" size="icon" className="rounded-full lg:hidden" aria-label="打开状态面板"><Menu /></Button>} />
+  <SheetContent side="right" className="w-[88%] max-w-sm overflow-y-auto p-0 sm:w-96">
+    <SheetHeader className="border-b border-border/60"><SheetTitle>冒险状态</SheetTitle></SheetHeader>
+    <StatusPanel state={state} conversation={conversation} />
+  </SheetContent>
+</Sheet>
+```
+
+The desktop toggle only hides or shows the aside. The state panel must own selection state so streamed `state` updates do not reset the selected role.

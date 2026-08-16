@@ -1,13 +1,13 @@
 # Routes
 
-| Route | Page | Purpose |
+| Route | Source | Purpose |
 | --- | --- | --- |
-| `/` | home | Local story library |
-| `/adventure` | adventure | Active story conversation and message composer |
-| `/settings` | settings | Providers, account API configuration, and non-per-turn generation settings |
-| `/materials` | materials | Role card and worldbook library |
-| `/editor` | editor | Story work authoring |
-| `/saves` | saves | Conversation save management |
-| `/account` | account | Account profile |
+| `/` | `frontend/app/page.tsx` | Local story library |
+| `/adventure` | `frontend/app/adventure/page.tsx` | Active story conversation, composer, and responsive status workspace |
+| `/settings` | `frontend/app/settings/page.tsx` | Provider and account configuration |
+| `/materials` | `frontend/app/materials/page.tsx` | Role card and worldbook library |
+| `/editor` | `frontend/app/editor/page.tsx` | Story work authoring |
+| `/saves` | `frontend/app/saves/page.tsx` | Conversation save management |
+| `/account` | `frontend/app/account/page.tsx` | Account profile |
 
-The current redesign is confined to `/adventure`. It reads provider state supplied by the existing settings API and moves the per-turn reasoning choice from `/settings` into the conversation composer.
+The redesign scope is only `/adventure`'s right-side status workspace.

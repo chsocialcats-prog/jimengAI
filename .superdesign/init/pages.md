@@ -2,14 +2,22 @@
 
 ## `/adventure`
 
-Route source: `app/adventure/page.tsx`.
+Route source: `frontend/app/adventure/page.tsx`
 
-Composition:
+```
+frontend/app/adventure/page.tsx
+└── frontend/components/adventure/adventure-view.tsx
+    ├── desktop <aside> and mobile <SheetContent>
+    │   └── frontend/components/adventure/status-panel.tsx
+    │       ├── frontend/components/ui/avatar.tsx
+    │       ├── frontend/components/ui/badge.tsx
+    │       ├── frontend/components/ui/progress.tsx
+    │       ├── frontend/components/ui/collapsible.tsx
+    │       └── frontend/components/ui/separator.tsx
+    ├── frontend/components/ui/sheet.tsx
+    ├── message timeline
+    ├── input composer and stream lifecycle
+    └── frontend/lib/api.ts (Conversation and AdventureState types)
+```
 
-`app/adventure/page.tsx` -> `components/adventure/adventure-view.tsx` -> `StatusPanel`, `InputGroup` primitives, session provider, `api`, `reply-length`.
-
-The page streams chat replies, exposes correction actions and reply length in the composer, and reacts to a conversation's current status. The planned model/reasoning control is a per-conversation composer preference: it must not break streaming, stop, autosave, or offline message behavior.
-
-## `/settings`
-
-`components/settings/settings-view.tsx` manages providers and persistent API configuration. Its old generation-parameter reasoning control is being relocated conceptually to `/adventure`; provider setup remains here.
+`StatusPanel` currently displays `state.attributes` under an incorrect "角色属性" heading. That data is player data. The redesign puts characters first and makes Player an explicit secondary list entry.

@@ -200,6 +200,12 @@ export type AdventureState = {
   updated_at?: string
 }
 
+export type MemorySummary = {
+  summary: string
+  covered_until_sequence: number
+  updated_at: string | null
+}
+
 export type Snapshot = {
   id: number
   conversation_id: number
@@ -560,6 +566,7 @@ export const api = {
   addCorrection: (id: number, kind: string, content: string) => request<Conversation>(`/api/conversations/${id}/corrections`, { method: 'POST', body: { kind, content } }),
   getMessages: (id: number) => request<Paginated<StoryMessage> | StoryMessage[]>(`/api/conversations/${id}/messages`).then((result) => Array.isArray(result) ? result : result.items || []),
   getState: (id: number) => request<AdventureState>(`/api/conversations/${id}/state`),
+  getMemorySummary: (id: number) => request<MemorySummary>(`/api/conversations/${id}/memory-summary`),
   updateState: (id: number, changes: Partial<AdventureState>) => request<AdventureState>(`/api/conversations/${id}/state`, { method: 'PUT', body: changes }),
   roll: (id: number, payload: { dice?: string; target?: number; attribute?: string; reason?: string }) => request<RollResult>(`/api/conversations/${id}/roll`, { method: 'POST', body: payload }),
   stopConversation: (id: number) => request<null>(`/api/conversations/${id}/stop`, { method: 'POST' }),

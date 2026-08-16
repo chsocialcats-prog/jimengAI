@@ -6,6 +6,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+DEFAULT_ACCOUNT_AVATAR_URL = "/images/avatars/default-account.png"
+
+
 @dataclass(frozen=True)
 class PublicUser:
     id: int

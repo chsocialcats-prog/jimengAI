@@ -72,6 +72,8 @@ class AuthRouteTests(unittest.TestCase):
         return response.json()["csrf_token"]
 
     def test_register_me_password_rotation_and_logout(self):
+        from backend.auth.types import DEFAULT_ACCOUNT_AVATAR_URL
+
         token = self.csrf()
         registered = self.client.post(
             "/api/auth/register", json={"username": "Alice", "password": "correct horse battery"},
@@ -79,6 +81,7 @@ class AuthRouteTests(unittest.TestCase):
         )
         self.assertEqual(registered.status_code, 201)
         self.assertTrue(registered.json()["authenticated"])
+        self.assertEqual(registered.json()["user"]["avatar_url"], DEFAULT_ACCOUNT_AVATAR_URL)
         old_session = self.client.cookies.get("neko_session")
         self.assertIn("HttpOnly", "\n".join(registered.headers.get_list("set-cookie")))
         self.assertEqual(self.client.get("/api/auth/me").json()["user"]["username"], "Alice")

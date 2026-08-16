@@ -2,30 +2,29 @@
 
 ## Product context
 
-- Zhimeng is a local, single-user Chinese AI text-adventure workspace for reading, writing, managing story materials, and continuing story sessions.
-- The product needs calm, compact, practical controls that stay out of the way of reading and composition.
-- The shared shell is `ai/ai/components/app-shell.tsx`; its sticky header, page content, and footer appear across the application.
+- Zhimeng is a local, single-user Chinese AI text-adventure workspace.
+- The `/adventure` view is a focused reading and writing workspace: story timeline and composer are primary; live session state is a compact supporting panel.
+- This task redesigns only the status area. The design must preserve the story timeline, composer, streaming behaviour, and API contracts.
 
 ## Visual foundation
 
-- Source of truth: `ai/ai/app/globals.css`.
-- Use the existing Noto Sans SC and rounded Chinese display font variables. Do not introduce another font.
-- Light mode uses a warm near-white background, white card surfaces, muted gray-pink text, a rose primary accent, and a restrained lavender secondary accent.
-- Dark mode must use the existing dark token values. Do not add gradients, saturated neon colors, or decorative background blobs.
-- Reuse only existing semantic tokens: `background`, `foreground`, `card`, `popover`, `border`, `muted`, `accent`, `primary`, `ring`, and their foreground variants.
+- Source of truth: `frontend/app/globals.css`.
+- Fonts: `--font-noto-sans-sc` for UI/body and `--font-zen-maru` for softly rounded display/story text. Do not introduce another font.
+- Light palette uses warm near-white `--background: oklch(0.986 0.008 40)`, white `--card`, rose `--primary: oklch(0.77 0.12 12)`, gray-pink foreground, blush `--secondary`, and lavender `--accent`.
+- Dark mode uses the existing muted plum tokens. Keep semantic token mappings and contrast intact.
+- Use only semantic Tailwind tokens: `background`, `foreground`, `card`, `popover`, `border`, `muted`, `secondary`, `accent`, `primary`, `ring`, and their foreground variants. No gradients, neon, or decorative blobs.
 
 ## Component language
 
-- Use Lucide icons for familiar actions. Keep controls compact, with clear hover and focus-visible states.
-- Buttons are often rounded-full in the current interface; circular icon buttons are appropriate for compact utilities.
-- Avoid floating cards and nested cards. Contextual utilities should be a compact cluster of circular controls.
-- Shadows are subtle. Borders are thin and token-based. Motion is short and functional, with reduced-motion support.
+- Controls use Lucide icons, `focus-visible` rings, thin token borders, quiet shadows, and short functional transitions.
+- The adventure shell uses `rounded-3xl` message/composer surfaces; smaller panel sections use `rounded-2xl` or unframed groups. Avoid a stack of nested cards.
+- Avatars are circular with a muted fallback initial. Badges are short rounded pills for status only.
+- Numeric values from 0 to 100 should be shown with the existing rose `Progress`; all other values use compact label/value rows.
+- Text must truncate in role rosters and wrap or clamp gracefully in narrow drawers.
 
-## Global floating quick actions
+## Status workspace direction
 
-- Add one global, fixed utility launcher outside scrollable page content and below modal layers.
-- Its default is the vertical center of the left edge. On pointer devices it is visually half-hidden while idle and fully revealed on hover, focus, or when its menu is open.
-- The primary launcher is a rose circular icon control. Three smaller circular actions appear as an inward-facing arc: Daily check-in, AI assistant, and Random scenario.
-- The launcher can be dragged and then snaps to the nearest viewport edge. It must remain within safe viewport bounds and preserve a 44px touch target on touch devices.
-- No labels are rendered inside the circles. Labels are available through tooltips and accessible names. The three secondary actions are visual placeholders only in this release.
-- Keep all existing navigation, story composer, modal, account, and provider behavior unchanged.
+- Keep the compact journey overview first. Make the selected character's identity and current attributes the detail focus.
+- Present frozen conversation roles in their source order, append runtime-only roles, and make Player a visually secondary final entry.
+- The initial selection is the first role; Player is selected only when explicitly chosen or when no role exists.
+- The same hierarchy and selection model must work in the desktop side panel and the mobile right drawer. The panel remains read-only.

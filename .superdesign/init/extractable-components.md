@@ -1,17 +1,11 @@
-# Extractable components
+# Extractable Components
 
-## `ModelReasoningSelector`
+## `StatusPanel`
 
-Candidate component within `components/adventure/`.
+- Source: `frontend/components/adventure/status-panel.tsx`
+- Category: responsive session-state workspace
+- Inputs: `state: AdventureState`, `conversation: Conversation`
+- Responsibilities: compact journey overview, character roster/detail, player entry, collapsed story memory; render-only and shared by desktop aside and mobile drawer.
+- Planned internal state: selected entity id/name, initialised to the first frozen role and preserved during streamed `state` updates.
 
-Inputs: available configured providers, active provider/model, selected reasoning intensity, loading state, provider update action, and selected reasoning callback.
-
-Responsibilities:
-
-- Render the compact trailing composer trigger.
-- Keep a single anchored popover open state.
-- Present current model and reasoning selections with a visible selected state.
-- Degrade cleanly while provider settings load or when no configured provider exists.
-- Never own the message text, streaming state, or chat event lifecycle.
-
-Do not extract correction buttons or the send control: their stream lifecycle ownership stays in `AdventureView`.
+Do not extract the panel into the global shell. It remains specific to the conversation route and must not own API requests, writes, or streaming lifecycle.

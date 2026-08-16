@@ -1,31 +1,69 @@
-# Shared components
+# Shared Components
 
-The application uses the shadcn-style primitives in `ai/ai/components/ui/`.
+The active frontend is `frontend/`. The adventure status workspace uses these primitives.
 
-## Button
+## `Avatar`
 
-Source: `components/ui/button.tsx`. Variant-driven command control. The design uses `ghost` for secondary input actions and `default`/icon sizing for the send action.
+Source: `frontend/components/ui/avatar.tsx`
 
-## Input and InputGroup
+```tsx
+function Avatar({ className, size = "default", ...props }) {
+  return <AvatarPrimitive.Root data-slot="avatar" data-size={size} className={cn("group/avatar relative flex size-8 shrink-0 rounded-full select-none after:absolute after:inset-0 after:rounded-full after:border after:border-border after:mix-blend-darken data-[size=lg]:size-10 data-[size=sm]:size-6 dark:after:mix-blend-lighten", className)} {...props} />
+}
+function AvatarImage({ className, ...props }) {
+  return <AvatarPrimitive.Image data-slot="avatar-image" className={cn("aspect-square size-full rounded-full object-cover", className)} {...props} />
+}
+function AvatarFallback({ className, ...props }) {
+  return <AvatarPrimitive.Fallback data-slot="avatar-fallback" className={cn("flex size-full items-center justify-center rounded-full bg-muted text-sm text-muted-foreground group-data-[size=sm]/avatar:text-xs", className)} {...props} />
+}
+```
 
-Source: `components/ui/input.tsx` and `components/ui/input-group.tsx`. `InputGroup` is the editable chat surface. It stacks `InputGroupTextarea` over a `block-end` `InputGroupAddon`, preserving a stable action row. The new selector belongs in this addon rather than a floating page card.
+## `Badge`
 
-## Badge and Card
+Source: `frontend/components/ui/badge.tsx`
 
-Source: `components/ui/badge.tsx` and `components/ui/card.tsx`. Badges communicate compact status only; cards frame repeated material settings and are not used for the composer itself.
+```tsx
+const badgeVariants = cva("group/badge inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-4xl border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-all focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50", {
+  variants: { variant: { default: "bg-primary text-primary-foreground", secondary: "bg-secondary text-secondary-foreground", destructive: "bg-destructive/10 text-destructive", outline: "border-border text-foreground", ghost: "hover:bg-muted hover:text-muted-foreground" } },
+  defaultVariants: { variant: "default" },
+})
+```
 
-## Popover
+## `Progress`
 
-Source: `components/ui/popover.tsx`. Radix popover primitive. It is the established anchored overlay for compact, contextual editing and will contain model and reasoning choices.
+Source: `frontend/components/ui/progress.tsx`
 
-## AppShell
+```tsx
+function Progress({ className, children, value, ...props }) {
+  return <ProgressPrimitive.Root value={value} data-slot="progress" className={cn("flex flex-wrap gap-3", className)} {...props}>{children}<ProgressTrack><ProgressIndicator /></ProgressTrack></ProgressPrimitive.Root>
+}
+function ProgressTrack({ className, ...props }) { return <ProgressPrimitive.Track data-slot="progress-track" className={cn("relative flex h-1 w-full items-center overflow-x-hidden rounded-full bg-muted", className)} {...props} /> }
+function ProgressIndicator({ className, ...props }) { return <ProgressPrimitive.Indicator data-slot="progress-indicator" className={cn("h-full bg-primary transition-all", className)} {...props} /> }
+```
 
-Source: `components/app-shell.tsx`. Owns application navigation, top-level page boundaries, responsive sidebar behavior, and the current Chinese product language.
+## `Collapsible` and `Separator`
 
-## RootLayout
+Sources: `frontend/components/ui/collapsible.tsx`, `frontend/components/ui/separator.tsx`
 
-Source: `app/layout.tsx`. Loads `globals.css`, font variables, the session provider, and the app shell around all route content.
+```tsx
+function Collapsible({ ...props }) { return <CollapsiblePrimitive.Root data-slot="collapsible" {...props} /> }
+function CollapsibleTrigger({ ...props }) { return <CollapsiblePrimitive.Trigger data-slot="collapsible-trigger" {...props} /> }
+function CollapsibleContent({ ...props }) { return <CollapsiblePrimitive.Panel data-slot="collapsible-content" {...props} /> }
+function Separator({ className, orientation = "horizontal", ...props }) {
+  return <SeparatorPrimitive data-slot="separator" orientation={orientation} className={cn("shrink-0 bg-border data-horizontal:h-px data-horizontal:w-full data-vertical:w-px data-vertical:self-stretch", className)} {...props} />
+}
+```
 
-## Composer action language
+## `Sheet`
 
-Use Lucide icons where there is a known metaphor. Existing commands remain textual only when the Chinese label disambiguates its destructive or correction effect. Model selection is a compact icon-plus-text control with truncation at small widths.
+Source: `frontend/components/ui/sheet.tsx`. The mobile status panel uses `SheetContent side="right"` with a width of `88%`, maximum `sm`, and vertical scrolling. It supplies dialog focus management and a close button.
+
+## Utility
+
+Source: `frontend/lib/utils.ts`
+
+```ts
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
+```

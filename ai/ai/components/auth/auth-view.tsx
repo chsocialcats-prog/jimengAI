@@ -1,8 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Sparkles, Eye, Lock, User as UserIcon } from 'lucide-react'
@@ -15,6 +14,19 @@ import { useSession } from '@/components/session-provider'
 
 type Mode = 'login' | 'register'
 
+const DEFAULT_ILLUSTRATION = '/images/auth-illustration.png'
+const ILLUSTRATION_MANIFEST = '/images/login-illustrations/manifest.json'
+
+function getIllustrationPaths(payload: unknown) {
+  if (!payload || typeof payload !== 'object' || !Array.isArray((payload as { images?: unknown }).images)) {
+    return []
+  }
+
+  return (payload as { images: unknown[] }).images.filter(
+    (image): image is string => typeof image === 'string' && image.startsWith('/images/login-illustrations/')
+  )
+}
+
 export function AuthView() {
   const router = useRouter()
   const { setSession } = useSession()
@@ -23,6 +35,64 @@ export function AuthView() {
   const [password, setPassword] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
+  const [illustration, setIllustration] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const showFallback = () => {
+      if (!cancelled) setIllustration(DEFAULT_ILLUSTRATION)
+    }
+
+    const loadRandomIllustration = async () => {
+      try {
+        const response = await fetch(ILLUSTRATION_MANIFEST, { cache: 'no-store' })
+        if (!response.ok) {
+          showFallback()
+          return
+        }
+
+        const images = getIllustrationPaths(await response.json())
+        if (!images.length) {
+          showFallback()
+          return
+        }
+
+        let previous: string | null = null
+        try {
+          previous = window.sessionStorage.getItem('zhimeng-last-login-illustration')
+        } catch {
+          // Storage access is optional and only prevents immediate repeats.
+        }
+        const candidates = images.length > 1 ? images.filter((image) => image !== previous) : images
+        const selected = candidates[Math.floor(Math.random() * candidates.length)] ?? images[0]
+        const preview = new window.Image()
+        const applyIllustration = () => {
+          if (cancelled) return
+          try {
+            window.sessionStorage.setItem('zhimeng-last-login-illustration', selected)
+          } catch {
+            // Storage access is optional and only prevents immediate repeats.
+          }
+          setIllustration(selected)
+        }
+
+        preview.onload = applyIllustration
+        preview.onerror = showFallback
+        preview.src = selected
+
+        if (preview.complete && preview.naturalWidth > 0) {
+          applyIllustration()
+        }
+      } catch {
+        showFallback()
+      }
+    }
+
+    void loadRandomIllustration()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const validate = () => {
     const next: Record<string, string> = {}
@@ -53,27 +123,31 @@ export function AuthView() {
   }
 
   return (
-    <div className="flex min-h-svh bg-background">
-      <div className="relative hidden w-1/2 overflow-hidden lg:block">
-        <Image
-          src="/images/auth-illustration.png"
-          alt="织梦 - 沉浸式文字冒险"
-          fill
-          priority
-          className="object-cover"
-          sizes="50vw"
+    <div className="relative isolate flex min-h-svh overflow-hidden bg-background">
+      {illustration && (
+        <img
+          src={illustration}
+          alt=""
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 h-full w-full object-cover"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-primary/40 via-transparent to-transparent" />
-        <div className="absolute bottom-0 left-0 right-0 p-10">
-          <p className="font-serif text-2xl font-semibold leading-relaxed text-white text-balance drop-shadow">
+      )}
+
+      <div className="relative flex min-h-svh w-full items-center justify-center px-6 py-10 lg:px-10">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-gradient-to-t from-primary/45 via-transparent to-transparent" />
+        <div className="pointer-events-none absolute bottom-0 left-0 hidden max-w-2xl p-10 xl:block xl:p-14">
+          <p className="font-serif text-2xl font-semibold leading-relaxed text-white text-balance drop-shadow md:text-3xl">
             每一次落笔，都是一个世界的开始。
           </p>
-          <p className="mt-2 text-sm text-white/85">用 AI 编织属于你的互动故事。</p>
+          <p className="mt-3 text-sm text-white/90 md:text-base">用 AI 编织属于你的互动故事。</p>
         </div>
-      </div>
 
-      <div className="flex w-full flex-col items-center justify-center px-6 py-12 lg:w-1/2">
-        <div className="w-full max-w-sm">
+        <div
+          className={`relative w-full max-w-md rounded-3xl border border-white/45 px-7 py-8 shadow-2xl sm:px-8 sm:py-9 ${
+            illustration ? 'bg-background/46 backdrop-blur-3xl dark:bg-background/54' : 'bg-background/95'
+          }`}
+        >
+          <div className="w-full">
           <Link href="/" className="mb-8 flex items-center gap-2">
             <span className="flex size-9 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
               <Sparkles className="size-5" />
@@ -92,7 +166,7 @@ export function AuthView() {
             <FieldGroup>
               <Field data-invalid={!!errors.username || undefined}>
                 <FieldLabel htmlFor="username">用户名</FieldLabel>
-                <InputGroup>
+                <InputGroup className="bg-background/75 backdrop-blur-sm dark:bg-background/75">
                   <InputGroupInput
                     id="username"
                     autoComplete="username"
@@ -110,7 +184,7 @@ export function AuthView() {
 
               <Field data-invalid={!!errors.password || undefined}>
                 <FieldLabel htmlFor="password">密码</FieldLabel>
-                <InputGroup>
+                <InputGroup className="bg-background/75 backdrop-blur-sm dark:bg-background/75">
                   <InputGroupInput
                     id="password"
                     type="password"
@@ -159,6 +233,7 @@ export function AuthView() {
           </p>
         </div>
       </div>
+    </div>
     </div>
   )
 }

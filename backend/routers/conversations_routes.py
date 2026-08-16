@@ -141,6 +141,16 @@ def get_state(conversation_id: int, auth: AuthContext = Depends(require_auth)):
     return state_service.get_state(_access_or_404(conversation_id, auth))
 
 
+@router.get("/{conversation_id}/memory-summary")
+def get_memory_summary(
+    conversation_id: int, auth: AuthContext = Depends(require_auth)
+):
+    access = _access_or_404(conversation_id, auth)
+    return conversation_repository.get_memory_summary_record(
+        conversation_id, access.auth.user.id
+    )
+
+
 @router.put("/{conversation_id}/state")
 def update_state(
     conversation_id: int,

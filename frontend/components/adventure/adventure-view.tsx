@@ -37,7 +37,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { StatusPanel } from './status-panel'
 import { ModelReasoningSelector } from './model-reasoning-selector'
 import { ThemeToggle } from '@/components/theme-toggle'
-import { api, streamChat, type AdventureState, type Conversation, type ModelProvider, type Snapshot, type StoryMessage } from '@/lib/api'
+import { api, streamChat, type AdventureState, type Conversation, type MemorySummary, type ModelProvider, type Snapshot, type StoryMessage } from '@/lib/api'
 import { useSession } from '@/components/session-provider'
 import { defaultReplyLength, loadReplyLength, saveReplyLength, type ReplyLengthKey } from '@/lib/reply-length'
 import { defaultReasoningEffort, loadReasoningEffort, saveReasoningEffort, type ReasoningEffortKey } from '@/lib/reasoning-effort'
@@ -51,6 +51,12 @@ const emptyState: AdventureState = {
   flags: [],
   characters: {},
   logs: [],
+}
+
+const emptyMemorySummary: MemorySummary = {
+  summary: '',
+  covered_until_sequence: -1,
+  updated_at: null,
 }
 
 const actionSuggestions = ['观察周围', '与角色交谈', '继续前进']
@@ -78,6 +84,7 @@ export function AdventureView() {
   const [conversation, setConversation] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<StoryMessage[]>([])
   const [state, setState] = useState<AdventureState>(emptyState)
+  const [memorySummary, setMemorySummary] = useState<MemorySummary>(emptyMemorySummary)
   const [input, setInput] = useState('')
   const [generating, setGenerating] = useState(false)
   const [panelOpen, setPanelOpen] = useState(true)
@@ -113,14 +120,16 @@ export function AdventureView() {
     setLoading(true)
     setError('')
     try {
-      const [nextConversation, nextMessages, nextState] = await Promise.all([
+      const [nextConversation, nextMessages, nextState, nextMemorySummary] = await Promise.all([
         api.getConversation(conversationId),
         api.getMessages(conversationId),
         api.getState(conversationId),
+        api.getMemorySummary(conversationId),
       ])
       setConversation(nextConversation)
       setMessages(nextMessages)
       setState(nextState)
+      setMemorySummary(nextMemorySummary)
       setReplyLength(loadReplyLength(nextConversation.id))
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : '无法读取冒险数据')
@@ -189,14 +198,16 @@ export function AdventureView() {
       onFinish: () => setGenerating(false),
     }, { reply_length: replyLength, reasoning_effort: reasoningEffort })
     try {
-      const [nextMessages, nextConversation, nextState] = await Promise.all([
+      const [nextMessages, nextConversation, nextState, nextMemorySummary] = await Promise.all([
         api.getMessages(conversationId),
         api.getConversation(conversationId),
         api.getState(conversationId),
+        api.getMemorySummary(conversationId),
       ])
       setMessages(nextMessages)
       setConversation(nextConversation)
       setState(nextState)
+      setMemorySummary(nextMemorySummary)
     } catch {
       // The partial response remains visible if the post-stream refresh is interrupted.
     }
@@ -217,6 +228,20 @@ export function AdventureView() {
       toast('正在停止生成…')
     } catch (stopError) {
       toast.error(stopError instanceof Error ? stopError.message : '无法停止生成')
+    }
+  }
+
+  const addManualLog = async (content: string) => {
+    if (!conversation) return
+    try {
+      const nextState = await api.updateState(conversation.id, {
+        logs: [{ type: 'manual', message: content.trim() }],
+      })
+      setState(nextState)
+      toast.success('已添加剧情日志')
+    } catch (saveError) {
+      toast.error(saveError instanceof Error ? saveError.message : '添加剧情日志失败')
+      throw saveError
     }
   }
 
@@ -292,6 +317,11 @@ export function AdventureView() {
       setState(restored.state)
       setConversation(restored.conversation)
       setMessages(restored.messages)
+      try {
+        setMemorySummary(await api.getMemorySummary(conversation.id))
+      } catch {
+        setMemorySummary(emptyMemorySummary)
+      }
       setSnapshotsOpen(false)
       toast.success('已恢复到所选存档点')
     } catch (restoreError) { toast.error(restoreError instanceof Error ? restoreError.message : '恢复存档失败') }
@@ -341,7 +371,7 @@ export function AdventureView() {
         <ThemeToggle />
         <Sheet>
           <SheetTrigger render={<Button variant="outline" size="icon" className="rounded-full lg:hidden" aria-label="打开状态面板"><Menu /></Button>} />
-          <SheetContent side="right" className="w-[88%] max-w-sm overflow-y-auto p-0 sm:w-96"><SheetHeader className="border-b border-border/60"><SheetTitle>冒险状态</SheetTitle></SheetHeader><StatusPanel state={state} conversation={conversation} /></SheetContent>
+          <SheetContent side="right" className="w-[88%] max-w-sm overflow-y-auto p-0 sm:w-96"><SheetHeader className="border-b border-border/60"><SheetTitle>冒险状态</SheetTitle></SheetHeader><StatusPanel state={state} conversation={conversation} memorySummary={memorySummary} onAddLog={addManualLog} /></SheetContent>
         </Sheet>
         <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon" className="hidden rounded-full lg:inline-flex" onClick={() => setPanelOpen((value) => !value)} aria-label={panelOpen ? '收起状态面板' : '展开状态面板'}>{panelOpen ? <PanelRightClose /> : <PanelRightOpen />}</Button>} /><TooltipContent>{panelOpen ? '收起状态面板' : '展开状态面板'}</TooltipContent></Tooltip>
       </header>
@@ -374,7 +404,7 @@ export function AdventureView() {
             </div>
           </div>
         </div>
-        {panelOpen && <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-border/60 bg-secondary/30 lg:block xl:w-96"><StatusPanel state={state} conversation={conversation} /></aside>}
+        {panelOpen && <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-border/60 bg-secondary/30 lg:block xl:w-96"><StatusPanel state={state} conversation={conversation} memorySummary={memorySummary} onAddLog={addManualLog} /></aside>}
       </div>
 
       <Dialog open={!!correctTarget} onOpenChange={(open) => !open && setCorrectTarget(null)}>

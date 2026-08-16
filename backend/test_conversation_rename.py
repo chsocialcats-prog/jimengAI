@@ -81,6 +81,29 @@ class ConversationRenameTests(IsolatedDatabaseTestCase):
         self.assertEqual(status_code, 200)
         self.assertEqual(body["characters"]["Frozen hero"]["attributes"]["mood"], 50)
 
+    def test_memory_summary_returns_the_current_conversation_record(self):
+        repositories.save_memory_summary(
+            self.conversation["id"], "旧城区的门已打开。", 6, user_id=self.test_user.id
+        )
+
+        status_code, body = self.request(
+            "GET", f"/api/conversations/{self.conversation['id']}/memory-summary", None
+        )
+
+        self.assertEqual(status_code, 200)
+        self.assertEqual(body["summary"], "旧城区的门已打开。")
+        self.assertEqual(body["covered_until_sequence"], 6)
+        self.assertIn("updated_at", body)
+
+    def test_memory_summary_missing_conversation_returns_standard_not_found(self):
+        status_code, body = self.request("GET", "/api/conversations/999999/memory-summary", None)
+
+        self.assertEqual(status_code, 404)
+        self.assertEqual(
+            body,
+            {"error": {"code": "not_found", "message": "冒险会话不存在"}},
+        )
+
     def request(self, method, path, payload):
         """Invoke the ASGI app without a third-party HTTP test client."""
         raw_body = json.dumps(payload).encode("utf-8")
