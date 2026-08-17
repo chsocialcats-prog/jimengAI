@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as R
 import { useRouter } from 'next/navigation'
 import { Bot, CalendarCheck, Dices, LoaderCircle, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
-import { api, type DailyCheckinStatus } from '@/lib/api'
+import { api, type DailyCheckinCalendar, type DailyCheckinStatus } from '@/lib/api'
 import { DailyFortuneDialog } from '@/components/daily-fortune-dialog'
 import { useSession } from '@/components/session-provider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -174,6 +174,9 @@ export function FloatingQuickActions() {
   const [checkingIn, setCheckingIn] = useState(false)
   const [randomizing, setRandomizing] = useState(false)
   const [dailyCheckin, setDailyCheckin] = useState<DailyCheckinStatus | null>(null)
+  const [dailyCalendar, setDailyCalendar] = useState<DailyCheckinCalendar | null>(null)
+  const [calendarLoading, setCalendarLoading] = useState(false)
+  const [calendarError, setCalendarError] = useState('')
   const [fortuneOpen, setFortuneOpen] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
 
@@ -232,6 +235,16 @@ export function FloatingQuickActions() {
     return false
   }
 
+  const loadDailyCalendar = () => {
+    setCalendarLoading(true)
+    setCalendarError('')
+    setDailyCalendar(null)
+    void api.getDailyCheckinCalendar()
+      .then((result) => setDailyCalendar(result))
+      .catch((error) => setCalendarError(error instanceof Error ? error.message : '无法读取本月签到记录'))
+      .finally(() => setCalendarLoading(false))
+  }
+
   const handleAction = (actionId: ActionId) => {
     if (actionId === 'random-script') {
       setRandomizing(true)
@@ -264,6 +277,7 @@ export function FloatingQuickActions() {
         setDailyCheckin(result)
         setFortuneOpen(true)
         setMenuOpen(false)
+        loadDailyCalendar()
       })
       .catch((error) => toast.error(error instanceof Error ? error.message : '签到失败'))
       .finally(() => setCheckingIn(false))
@@ -386,7 +400,7 @@ export function FloatingQuickActions() {
           )
         })}
       </div>
-      <DailyFortuneDialog open={fortuneOpen} onOpenChange={setFortuneOpen} checkin={dailyCheckin} />
+      <DailyFortuneDialog open={fortuneOpen} onOpenChange={setFortuneOpen} checkin={dailyCheckin} calendar={dailyCalendar} calendarLoading={calendarLoading} calendarError={calendarError} onRetryCalendar={loadDailyCalendar} />
       {user && <WebAssistantSheet open={assistantOpen} onOpenChange={setAssistantOpen} user={user} />}
     </div>
   )

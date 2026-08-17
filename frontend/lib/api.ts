@@ -40,12 +40,29 @@ export type DailyCheckinStatus = {
   already_checked_in?: boolean
 }
 
+export type DailyCheckinCalendar = {
+  month: string
+  checkin_dates: string[]
+  festivals: DailyFestival[]
+}
+
+export type DailyFestival = {
+  date: string
+  id: string
+  name: string
+  icon: string
+  priority: number
+}
+
+export type DailyFortuneFestival = Omit<DailyFestival, 'date'>
+
 export type DailyFortune = {
   rank: '大吉' | '中吉' | '小吉' | '平'
   verse: string
   lucky_color: string
   do: string
   avoid: string
+  festival?: DailyFortuneFestival
 }
 
 export type WebAssistantMessage = {
@@ -167,6 +184,7 @@ export type Conversation = {
   onboarding_status: 'pending' | 'completed'
   onboarding_config: OnboardingConfig
   onboarding_answers: Record<string, string>
+  pending_options: string[]
   card_snapshot: RoleCard | Record<string, never>
   card_snapshots: RoleCard[]
   parent_conversation_id?: number | null
@@ -521,6 +539,7 @@ export const api = {
   changePassword: (currentPassword: string, newPassword: string) => request<AuthSession>('/api/auth/password', { method: 'PUT', body: { current_password: currentPassword, new_password: newPassword } }),
   updateProfile: (payload: { avatar_url: string }) => request<AuthSession>('/api/auth/profile', { method: 'PUT', body: payload }),
   getDailyCheckin: () => request<DailyCheckinStatus>('/api/daily-checkin'),
+  getDailyCheckinCalendar: () => request<DailyCheckinCalendar>('/api/daily-checkin/calendar'),
   checkIn: () => request<DailyCheckinStatus>('/api/daily-checkin', { method: 'POST' }),
   chatWithAssistant: (messages: WebAssistantMessage[], pagePath = '') => request<{ message: string; mock: boolean }>('/api/assistant/chat', { method: 'POST', body: { messages, page_path: pagePath } }),
   uploadImage: (file: File) => request<UploadedImage>('/api/uploads/images', {

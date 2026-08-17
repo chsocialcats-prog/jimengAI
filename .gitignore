@@ -3,7 +3,12 @@ __pycache__/
 .venv/
 .pytest_cache/
 .superpowers/
+.superdesign/
 .worktrees/
+
+# Local-only application state
+config.json
+.frontend-legacy-backup/
 node_modules/
 .env
 .env.*

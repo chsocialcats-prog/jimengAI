@@ -41,6 +41,7 @@ from .repository.conversation_repository import (
     list_conversations,
     row_to_conversation,
     row_to_message,
+    set_pending_options as _set_pending_options,
     update_conversation,
     update_message,
 )
@@ -152,6 +153,12 @@ def create_conversation_branch(
 def complete_conversation_onboarding(conversation_id, answers, *, user_id):
     return _complete_conversation_onboarding(
         conversation_id, user_id, answers, connect_fn=connect
+    )
+
+
+def set_pending_options(conversation_id, options, *, user_id):
+    return _set_pending_options(
+        conversation_id, user_id, options, connect_fn=connect
     )
 
 

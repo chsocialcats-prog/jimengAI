@@ -46,7 +46,7 @@ python start.py --no-browser
 - `DEEPSEEK_BASE_URL`
 - `DEEPSEEK_MODEL`
 
-本地 `config.json` 可能包含真实密钥，不要读取、复制或提交其秘密值。SQLite 运行数据位于 `data/app.db`，也不应手动编辑或提交。
+`config.example.json` 是可提交的配置模板。需要本地文件配置时，先复制它为 `config.json`；该文件已被 Git 忽略，且环境变量会覆盖其中的 AI 连接配置。SQLite 运行数据位于 `data/app.db`，也不应手动编辑或提交。
 
 新实例的第一个注册账号会在事务中认领旧的无主资源，并将旧配置中的明文 API key 加密迁移到该账号；清理未完成时写请求会被拒绝，恢复方式见 [`docs/deployment-account-security.md`](docs/deployment-account-security.md)。请先备份数据目录和主密钥，再做迁移或轮换。不要使用多 worker：会话生成锁和 stop 事件保存在单进程内存中。
 
@@ -70,11 +70,13 @@ frontend/
 ├── public/                公开静态资源
 ├── out/                   由 Next 导出的运行时静态文件
 └── package.json           前端构建脚本与依赖
+插画/                      登录页插画源文件，构建时同步至前端公开资源
 docs/
 ├── api-contract.md        SSE 与兼容语义 notes
 ├── superpowers/baselines/ 清理前行为基线
 └── archive/               历史计划、handoff 和一次性 QA 资源
 start.py                   Windows 启动器
+config.example.json        可安全提交的本地配置模板
 ```
 
 ## 测试

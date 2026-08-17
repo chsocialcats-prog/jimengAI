@@ -5,7 +5,9 @@ import { Bot, Brain, Check, ChevronDown, ChevronLeft, ChevronRight, LoaderCircle
 import { toast } from 'sonner'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { api, type ModelProvider } from '@/lib/api'
+import { refreshApiStatus } from '@/lib/api-status'
 import { reasoningEffortPresets, type ReasoningEffortKey } from '@/lib/reasoning-effort'
+import { useSession } from '@/components/session-provider'
 
 type SelectorPanel = 'menu' | 'model' | 'reasoning'
 
@@ -34,6 +36,7 @@ export function ModelReasoningSelector({
   onReasoningEffortChange: (effort: ReasoningEffortKey) => void
   onProvidersRefresh: () => Promise<void>
 }) {
+  const { session } = useSession()
   const [open, setOpen] = useState(false)
   const [panel, setPanel] = useState<SelectorPanel>('menu')
   const [savingModel, setSavingModel] = useState(false)
@@ -58,6 +61,7 @@ export function ModelReasoningSelector({
     try {
       await api.updateProvider(option.provider.provider_id, { model: option.model, activate: true })
       await onProvidersRefresh()
+      if (session.user) void refreshApiStatus(session.user.id, { force: true })
       toast.success(`已切换到 ${option.model}`)
       close()
     } catch (error) {

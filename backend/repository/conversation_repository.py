@@ -1,4 +1,5 @@
 from contextlib import closing
+import sqlite3
 
 from .. import database
 from ..auth.types import ConversationAccess
@@ -13,6 +14,20 @@ _EMPTY_CARD_SNAPSHOT_MARKER = {"_conversation_card_snapshots_authoritative": Tru
 
 class ConversationRecord(dict):
     """Conversation mapping with non-serialized snapshot provenance."""
+
+
+def normalize_pending_options(value):
+    """Return the bounded, display-safe action choices for a saved turn."""
+    if not isinstance(value, list):
+        return []
+    options = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        option = item.strip()
+        if option and option not in options:
+            options.append(option[:500])
+    return options[:4]
 
 
 def row_to_conversation(row):
@@ -30,6 +45,9 @@ def row_to_conversation(row):
     data["onboarding_answers"] = database.json_loads(data.get("onboarding_answers"), {})
     data["persona_corrections"] = database.json_loads(data.get("persona_corrections"), [])
     data["memory_corrections"] = database.json_loads(data.get("memory_corrections"), [])
+    data["pending_options"] = normalize_pending_options(
+        database.json_loads(data.get("pending_options"), [])
+    )
     return data
 
 
@@ -143,7 +161,7 @@ def _ordered_work_cards_in_connection(connection, work_id, legacy_card_id=None):
 
 
 def create_conversation(work_id, title, user_id, *, connect_fn=database.connect):
-    """根据作品创建会话，并初始化状态、开场消息和记忆摘要。"""
+    """根据作品创建待引导会话，并初始化状态和记忆摘要。"""
     onboarding_status = "pending"
     now = database.now_str()
     with closing(connect_fn()) as connection:
@@ -214,36 +232,6 @@ def create_conversation(work_id, title, user_id, *, connect_fn=database.connect)
             "VALUES (?, '', ?)",
             (conversation_id, now),
         )
-        opening_parts = ["🌟 本次冒险已开始", "", "🎬 场景与开场", work.get("opening") or "故事从这里开始。"]
-        if card:
-            opening_parts.extend(["", f"👤 主要角色：{card.get('name', '未命名角色')}"])
-            if card.get("persona"):
-                opening_parts.append(f"人设：{card['persona']}")
-            if card.get("relationships"):
-                opening_parts.append("关系：" + "；".join(f"{key}：{value}" for key, value in card["relationships"].items()))
-        worldbook = get_worldbook(work["worldbook_id"]) if work.get("worldbook_id") else None
-        if worldbook and worldbook.get("description"):
-            opening_parts.extend(["", "📖 世界与记忆", worldbook["description"]])
-        opening_content = "\n".join(opening_parts)
-        if opening_content:
-            connection.execute(
-                """
-                INSERT INTO messages (
-                    conversation_id, role, content, sequence, metadata,
-                    token_count, created_at
-                ) VALUES (?, 'assistant', ?, 0, ?, 0, ?)
-                """,
-                (
-                    conversation_id,
-                    opening_content,
-                    database.json_dumps({"kind": "opening", "formatted": True}),
-                    now,
-                ),
-            )
-            connection.execute(
-                "UPDATE conversations SET last_message_at = ? WHERE id = ?",
-                (now, conversation_id),
-            )
         connection.commit()
     return get_conversation(conversation_id, user_id)
 
@@ -270,6 +258,7 @@ def create_conversation_branch(
             memory = _get_memory_summary_record_in_connection(connection, source_conversation_id)
             persona_corrections = source.get("persona_corrections") or []
             memory_corrections = source.get("memory_corrections") or []
+            pending_options = source.get("pending_options") or []
         else:
             snapshot_row = connection.execute(
                 "SELECT snapshots.* FROM snapshots JOIN conversations "
@@ -290,6 +279,9 @@ def create_conversation_branch(
             }
             persona_corrections = database.json_loads(snapshot_row["persona_corrections"], [])
             memory_corrections = database.json_loads(snapshot_row["memory_corrections"], [])
+            pending_options = normalize_pending_options(
+                database.json_loads(snapshot_row["pending_options"], [])
+            )
         card_snapshots = _json_safe_copy(get_conversation_cards(source), [])
         card_snapshot = card_snapshots[0] if card_snapshots else _EMPTY_CARD_SNAPSHOT_MARKER
         card_id = card_snapshot.get("id") if isinstance(card_snapshot, dict) else source.get("card_id")
@@ -299,8 +291,8 @@ def create_conversation_branch(
                 user_id, work_id, card_id, worldbook_id, title, status, current_state,
                 card_snapshot, card_snapshots, parent_conversation_id, branch_label,
                 onboarding_status, onboarding_config, onboarding_answers,
-                persona_corrections, memory_corrections, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                persona_corrections, memory_corrections, pending_options, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id, source.get("work_id"), card_id, source.get("worldbook_id"), title,
@@ -310,7 +302,9 @@ def create_conversation_branch(
                 database.json_dumps(source.get("onboarding_config") or {}),
                 database.json_dumps(source.get("onboarding_answers") or {}),
                 database.json_dumps(persona_corrections or []),
-                database.json_dumps(memory_corrections or []), now, now,
+                database.json_dumps(memory_corrections or []),
+                database.json_dumps(normalize_pending_options(pending_options)),
+                now, now,
             ),
         )
         conversation_id = cursor.lastrowid
@@ -345,11 +339,33 @@ def set_conversation_status(conversation_id, user_id, status):
     return get_conversation(conversation_id, user_id)
 
 
+def set_pending_options(
+    conversation_id, user_id, options, *, connect_fn=database.connect
+):
+    """Persist the latest unselected action choices for this conversation."""
+    normalized = normalize_pending_options(options)
+    with closing(connect_fn()) as connection:
+        try:
+            connection.execute(
+                "UPDATE conversations SET pending_options = ? WHERE id = ? AND user_id = ?",
+                (database.json_dumps(normalized), conversation_id, user_id),
+            )
+        except sqlite3.OperationalError as exc:
+            # A production database is migrated during startup. This keeps
+            # legacy read-only/test fixtures usable until that migration runs.
+            if "no such column: pending_options" not in str(exc):
+                raise
+            return normalized
+        connection.commit()
+    return normalized
+
+
 def complete_conversation_onboarding(
     conversation_id, user_id, answers, *, connect_fn=database.connect
 ):
     conversation = get_conversation(conversation_id, user_id)
     if conversation is None: return None
+    is_first_completion = conversation.get("onboarding_status") != "completed"
     accepted, config = {}, conversation["onboarding_config"]
     fields = config.get("fields", []) or [{"key": key, "required": False} for key in ("name", "age", "identity", "preference", "boundary")]
     for field in fields:
@@ -363,17 +379,25 @@ def complete_conversation_onboarding(
         if key != "freeform" and value:
             accepted[str(key)[:80]] = value
     database.execute("UPDATE conversations SET onboarding_status = 'completed', onboarding_answers = ?, updated_at = ? WHERE id = ? AND user_id = ?", (database.json_dumps(accepted), database.now_str(), conversation_id, user_id))
-    work = get_work(conversation.get("work_id")) if conversation.get("work_id") else None
-    card = get_conversation_card(conversation)
-    worldbook = get_worldbook(conversation.get("worldbook_id")) if conversation.get("worldbook_id") else None
-    lines = ["✨ 开局设定已确认", "", "🎬 场景", (work or {}).get("opening", "故事从这里开始。")]
-    if card:
-        lines += ["", f"👤 主要角色：{card.get('name', '未命名角色')}", card.get("persona", "")]
-    if worldbook and worldbook.get("description"):
-        lines += ["", "📖 世界与关键记忆", worldbook["description"]]
-    if accepted:
-        lines += ["", "🧭 本次会话设定"] + [f"- {key}：{value}" for key, value in accepted.items()]
-    create_message(conversation_id, user_id, "assistant", "\n".join(item for item in lines if item is not None), metadata={"kind": "onboarding_confirmed"}, connect_fn=connect_fn)
+    if is_first_completion:
+        work = get_work(conversation.get("work_id")) if conversation.get("work_id") else None
+        card = get_conversation_card(conversation)
+        worldbook = get_worldbook(conversation.get("worldbook_id")) if conversation.get("worldbook_id") else None
+        lines = ["✨ 开局设定已确认", "", "🎬 场景", (work or {}).get("opening", "故事从这里开始。")]
+        if card:
+            lines += ["", f"👤 主要角色：{card.get('name', '未命名角色')}", card.get("persona", "")]
+        if worldbook and worldbook.get("description"):
+            lines += ["", "📖 世界与关键记忆", worldbook["description"]]
+        if accepted:
+            lines += ["", "🧭 本次会话设定"] + [f"- {key}：{value}" for key, value in accepted.items()]
+        create_message(
+            conversation_id,
+            user_id,
+            "assistant",
+            "\n".join(item for item in lines if item is not None),
+            metadata={"kind": "opening", "formatted": True},
+            connect_fn=connect_fn,
+        )
     return get_conversation(conversation_id, user_id)
 
 

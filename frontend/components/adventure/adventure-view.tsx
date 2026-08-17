@@ -11,7 +11,9 @@ import {
   Square,
   Flag,
   Copy,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Sparkles,
   Save,
   Menu,
@@ -20,6 +22,7 @@ import {
   RotateCcw,
   Trash2,
   Settings2,
+  Type,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -34,13 +37,17 @@ import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Slider } from '@/components/ui/slider'
 import { StatusPanel } from './status-panel'
 import { ModelReasoningSelector } from './model-reasoning-selector'
+import { AccountMenu } from '@/components/account-menu'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { api, streamChat, type AdventureState, type Conversation, type MemorySummary, type ModelProvider, type Snapshot, type StoryMessage } from '@/lib/api'
 import { useSession } from '@/components/session-provider'
 import { defaultReplyLength, loadReplyLength, saveReplyLength, type ReplyLengthKey } from '@/lib/reply-length'
 import { defaultReasoningEffort, loadReasoningEffort, saveReasoningEffort, type ReasoningEffortKey } from '@/lib/reasoning-effort'
+import { defaultStoryFontSize, loadStoryFontSize, maxStoryFontSize, minStoryFontSize, saveStoryFontSize, storyFontSizeStep } from '@/lib/story-font-size'
 
 const emptyState: AdventureState = {
   attributes: {},
@@ -61,12 +68,22 @@ const emptyMemorySummary: MemorySummary = {
 
 const actionSuggestions = ['观察周围', '与角色交谈', '继续前进']
 
-function latestActionOptions(messages: StoryMessage[]) {
+function actionOptions(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return value.filter((option): option is string => typeof option === 'string' && Boolean(option.trim())).slice(0, 4)
+}
+
+function latestActionOptions(conversation: Conversation, messages: StoryMessage[]) {
+  const pending = actionOptions(conversation.pending_options)
+  if (pending.length) return pending
   const latestAssistant = [...messages].reverse().find((message) => message.role === 'assistant')
-  const options = latestAssistant?.metadata?.options
-  if (!Array.isArray(options)) return actionSuggestions
-  const visible = options.filter((option): option is string => typeof option === 'string' && Boolean(option.trim())).slice(0, 4)
+  const visible = actionOptions(latestAssistant?.metadata?.options)
   return visible.length ? visible : actionSuggestions
+}
+
+function isOpeningMessage(message: StoryMessage) {
+  const kind = message.metadata?.kind
+  return kind === 'opening' || kind === 'onboarding_confirmed'
 }
 
 function formatTime(value: string) {
@@ -75,12 +92,17 @@ function formatTime(value: string) {
   return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(date)
 }
 
+function countMessageCharacters(value: string) {
+  return Array.from(value.replace(/\s/g, '')).length
+}
+
 export function AdventureView() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { session } = useSession()
   const rawId = searchParams.get('conversation') || ''
   const conversationId = Number(rawId)
+  const showOpening = searchParams.get('new') === '1'
   const [conversation, setConversation] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<StoryMessage[]>([])
   const [state, setState] = useState<AdventureState>(emptyState)
@@ -88,11 +110,13 @@ export function AdventureView() {
   const [input, setInput] = useState('')
   const [generating, setGenerating] = useState(false)
   const [panelOpen, setPanelOpen] = useState(true)
+  const [toolbarOpen, setToolbarOpen] = useState(false)
   const [correctTarget, setCorrectTarget] = useState<StoryMessage | null>(null)
   const [correction, setCorrection] = useState('')
   const [correctionKind, setCorrectionKind] = useState('memory')
   const [replyLength, setReplyLength] = useState<ReplyLengthKey>(defaultReplyLength)
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffortKey>(defaultReasoningEffort)
+  const [storyFontSize, setStoryFontSize] = useState(defaultStoryFontSize)
   const [providers, setProviders] = useState<ModelProvider[]>([])
   const [providersLoading, setProvidersLoading] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
@@ -111,6 +135,10 @@ export function AdventureView() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    setStoryFontSize(loadStoryFontSize())
+  }, [])
 
   const loadAdventure = async () => {
     if (!Number.isInteger(conversationId) || conversationId <= 0 || !session.authenticated) {
@@ -359,28 +387,54 @@ export function AdventureView() {
   if (error || !conversation) {
     return <AdventureEmpty title="无法打开这个冒险" description={error || '会话不存在或你没有访问权限。'} actionHref="/saves" actionLabel="返回存档" />
   }
+  const onboardingExtraKey = conversation.onboarding_config?.allow_freeform ? 'freeform' : 'session_setup'
+  const onboardingExtraLabel = conversation.onboarding_config?.allow_freeform ? '补充设定' : '本次开局设定'
 
   return (
-    <div className="flex h-[calc(100dvh-0px)] flex-col bg-background md:h-screen">
-      <header className="flex shrink-0 items-center gap-3 border-b border-border/60 bg-card/80 px-4 py-3 backdrop-blur-sm">
-        <Button variant="ghost" size="icon" className="rounded-full" render={<Link href="/saves" aria-label="返回我的存档" />} nativeButton={false}><ArrowLeft /></Button>
-        <div className="min-w-0 flex-1"><h1 className="truncate text-sm font-semibold text-foreground">{conversation.title}</h1><p className="truncate text-xs text-muted-foreground">{conversation.status === 'archived' ? '已归档 · 只读前请恢复' : '正在冒险 · 自动保存已开启'}</p></div>
-        <Badge variant="secondary" className="hidden gap-1 rounded-full sm:inline-flex"><Save className="size-3" />已自动保存</Badge>
-        <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon" className="rounded-full" onClick={() => void openSnapshots()} aria-label="管理存档点"><Save /></Button>} /><TooltipContent>管理存档点</TooltipContent></Tooltip>
-        <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon" className="hidden rounded-full sm:inline-flex" onClick={openOnboarding} aria-label="编辑开局设定"><Settings2 /></Button>} /><TooltipContent>编辑开局设定</TooltipContent></Tooltip>
-        <ThemeToggle />
-        <Sheet>
-          <SheetTrigger render={<Button variant="outline" size="icon" className="rounded-full lg:hidden" aria-label="打开状态面板"><Menu /></Button>} />
-          <SheetContent side="right" className="w-[88%] max-w-sm overflow-y-auto p-0 sm:w-96"><SheetHeader className="border-b border-border/60"><SheetTitle>冒险状态</SheetTitle></SheetHeader><StatusPanel state={state} conversation={conversation} memorySummary={memorySummary} onAddLog={addManualLog} /></SheetContent>
-        </Sheet>
-        <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon" className="hidden rounded-full lg:inline-flex" onClick={() => setPanelOpen((value) => !value)} aria-label={panelOpen ? '收起状态面板' : '展开状态面板'}>{panelOpen ? <PanelRightClose /> : <PanelRightOpen />}</Button>} /><TooltipContent>{panelOpen ? '收起状态面板' : '展开状态面板'}</TooltipContent></Tooltip>
-      </header>
+    <div className="relative flex h-[calc(100dvh-0px)] flex-col bg-background md:h-screen">
+      {toolbarOpen ? (
+        <header className="flex shrink-0 items-center gap-1 border-b border-border/60 bg-card/80 px-3 py-3 backdrop-blur-sm sm:gap-3 sm:px-4">
+          <Button variant="ghost" size="icon" className="rounded-full" render={<Link href="/saves" aria-label="返回我的存档" />} nativeButton={false}><ArrowLeft /></Button>
+          <div className="min-w-0 flex-1"><h1 className="truncate text-sm font-semibold text-foreground">{conversation.title}</h1><p className="truncate text-xs text-muted-foreground">{conversation.status === 'archived' ? '已归档 · 只读前请恢复' : '正在冒险 · 自动保存已开启'}</p></div>
+          <Badge variant="secondary" className="hidden gap-1 rounded-full sm:inline-flex"><Save className="size-3" />已自动保存</Badge>
+          <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon" className="rounded-full" onClick={() => void openSnapshots()} aria-label="管理存档点"><Save /></Button>} /><TooltipContent>管理存档点</TooltipContent></Tooltip>
+          <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon" className="rounded-full" onClick={openOnboarding} aria-label="编辑开局设定"><Settings2 /></Button>} /><TooltipContent>编辑开局设定</TooltipContent></Tooltip>
+          <Popover>
+            <Tooltip>
+              <TooltipTrigger render={<PopoverTrigger render={<Button variant="outline" size="icon" className="shrink-0 rounded-full" aria-label="阅读字号"><Type /></Button>} />} />
+              <TooltipContent>阅读字号</TooltipContent>
+            </Tooltip>
+            <PopoverContent align="end" sideOffset={8} className="w-64 gap-3 rounded-2xl p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">阅读字号</span>
+                <output aria-live="polite" className="font-mono text-sm tabular-nums text-muted-foreground">{storyFontSize}px</output>
+              </div>
+              <div className="flex items-center gap-3">
+                <span aria-hidden="true" className="text-xs text-muted-foreground">A</span>
+                <Slider aria-label="AI 剧情字号" value={[storyFontSize]} min={minStoryFontSize} max={maxStoryFontSize} step={storyFontSizeStep} onValueChange={(value) => setStoryFontSize(saveStoryFontSize(typeof value === 'number' ? value : value[0]))} />
+                <span aria-hidden="true" className="text-base text-muted-foreground">A</span>
+              </div>
+              <Button variant="ghost" size="sm" className="ml-auto rounded-full" onClick={() => setStoryFontSize(saveStoryFontSize(defaultStoryFontSize))}>恢复默认</Button>
+            </PopoverContent>
+          </Popover>
+          <ThemeToggle />
+          <Sheet>
+            <SheetTrigger render={<Button variant="outline" size="icon" className="rounded-full lg:hidden" aria-label="打开状态面板"><Menu /></Button>} />
+            <SheetContent side="right" className="w-[88%] max-w-sm overflow-y-auto p-0 sm:w-96"><SheetHeader className="border-b border-border/60"><SheetTitle>冒险状态</SheetTitle></SheetHeader><StatusPanel state={state} conversation={conversation} memorySummary={memorySummary} onAddLog={addManualLog} playerAvatarUrl={session.user?.avatar_url} playerUsername={session.user?.username} /></SheetContent>
+          </Sheet>
+          <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon" className="hidden rounded-full lg:inline-flex" onClick={() => setPanelOpen((value) => !value)} aria-label={panelOpen ? '收起状态面板' : '展开状态面板'}>{panelOpen ? <PanelRightClose /> : <PanelRightOpen />}</Button>} /><TooltipContent>{panelOpen ? '收起状态面板' : '展开状态面板'}</TooltipContent></Tooltip>
+          <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon-sm" className="shrink-0 rounded-full" aria-label="收起工具栏" aria-expanded={true} onClick={() => setToolbarOpen(false)}><ChevronUp /></Button>} /><TooltipContent>收起工具栏</TooltipContent></Tooltip>
+          <AccountMenu />
+        </header>
+      ) : (
+        <Tooltip><TooltipTrigger render={<Button variant="ghost" size="icon-sm" className="absolute top-0 left-1/2 z-20 h-7 w-12 -translate-x-1/2 rounded-t-none rounded-b-xl border border-t-0 border-border/50 bg-card/50 text-muted-foreground shadow-sm backdrop-blur-md hover:text-foreground" aria-label="展开工具栏" aria-expanded={false} onClick={() => setToolbarOpen(true)}><ChevronDown className="size-4" /></Button>} /><TooltipContent>展开工具栏</TooltipContent></Tooltip>
+      )}
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
           <div ref={scrollRef} className="flex-1 overflow-y-auto">
             <div className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-8 md:px-6">
-              {messages.map((message) => <MessageBlock key={message.id} message={message} onCorrect={() => openCorrection('memory', message)} />)}
+              {(showOpening ? messages : messages.filter((message) => !isOpeningMessage(message))).map((message) => <MessageBlock key={message.id} message={message} storyFontSize={storyFontSize} onCorrect={() => openCorrection('memory', message)} />)}
               {generating && messages.at(-1)?.content === '' && (
                 <div className="flex flex-col gap-2"><div className="flex items-center gap-2 text-sm text-primary"><Spinner /><span>正在续写剧情…</span></div><div className="flex flex-col gap-2 rounded-3xl rounded-tl-md bg-card p-5 shadow-sm"><div className="h-3 w-[92%] animate-pulse rounded-full bg-muted" /><div className="h-3 w-[78%] animate-pulse rounded-full bg-muted" /><div className="h-3 w-[85%] animate-pulse rounded-full bg-muted" /></div></div>
               )}
@@ -388,23 +442,25 @@ export function AdventureView() {
           </div>
 
           <div className="shrink-0 border-t border-border/60 bg-card/80 backdrop-blur-sm">
-            <div className="mx-auto w-full max-w-2xl px-4 py-3 md:px-6">
+            <div className="w-full px-3 py-3 sm:px-4 md:px-6 lg:px-8 xl:px-10">
               {!generating && conversation.status === 'active' && (
-                <div className="mb-3 flex flex-wrap gap-2">
-                  {latestActionOptions(messages).map((option) => <button key={option} type="button" onClick={() => void submit(option)} className="group inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/5 px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-primary/10"><Sparkles className="size-3.5 text-primary" /><span>{option}</span><ChevronRight className="size-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5" /></button>)}
+                <div className="mb-3 grid w-full grid-cols-1 gap-2 md:grid-cols-2 md:gap-2.5">
+                  {latestActionOptions(conversation, messages).map((option) => <button key={option} type="button" onClick={() => void submit(option)} className="group flex min-h-11 w-full items-start gap-2 rounded-2xl border border-primary/30 bg-primary/5 px-4 py-2.5 text-left text-[13px] text-foreground transition-colors hover:bg-primary/10 sm:text-sm"><Sparkles className="mt-0.5 size-3.5 shrink-0 text-primary" /><span className="min-w-0 flex-1 whitespace-normal leading-5">{option}</span><ChevronRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" /></button>)}
                 </div>
               )}
-              <InputGroup className="rounded-3xl">
-                <InputGroupTextarea placeholder={conversation.status === 'archived' ? '该会话已归档，请先恢复后继续。' : '描述你的行动或对话…（Enter 发送，Shift+Enter 换行）'} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handleKeyDown} disabled={generating || conversation.status !== 'active'} className="min-h-[52px]" />
-                <InputGroupAddon align="block-end" className="flex-wrap justify-between gap-x-2 gap-y-1.5">
-                  <div className="flex min-w-0 items-center gap-2"><button type="button" className="shrink-0 text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={() => openCorrection('persona')} disabled={generating}>修正人设</button><span className="shrink-0 text-border">·</span><button type="button" className="shrink-0 text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={() => openCorrection('memory')} disabled={generating}>修正记忆</button><select aria-label="回复长度" value={replyLength} onChange={(event) => setReplyLength(saveReplyLength(conversation.id, event.target.value))} disabled={generating} className="max-w-20 bg-transparent text-xs text-muted-foreground outline-none"><option value="short">简短</option><option value="standard">标准</option><option value="detailed">详细</option><option value="long">超长</option></select></div>
-                  <div className="ml-auto flex shrink-0 items-center gap-2"><ModelReasoningSelector providers={providers} providersLoading={providersLoading} reasoningEffort={reasoningEffort} disabled={generating || conversation.status !== 'active'} onReasoningEffortChange={(effort) => setReasoningEffort(saveReasoningEffort(conversation.id, effort))} onProvidersRefresh={refreshProviders} />{generating ? <InputGroupButton variant="outline" className="rounded-full" onClick={() => void stop()}><Square data-icon="inline-start" />停止</InputGroupButton> : <InputGroupButton variant="default" className="rounded-full" disabled={!input.trim() || conversation.status !== 'active'} onClick={() => void submit(input)}><Send data-icon="inline-start" />发送</InputGroupButton>}</div>
-                </InputGroupAddon>
-              </InputGroup>
+              <div className="mx-auto w-full max-w-2xl">
+                <InputGroup className="rounded-3xl">
+                  <InputGroupTextarea placeholder={conversation.status === 'archived' ? '该会话已归档，请先恢复后继续。' : '描述你的行动或对话…（Enter 发送，Shift+Enter 换行）'} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handleKeyDown} disabled={generating || conversation.status !== 'active'} className="min-h-[52px]" />
+                  <InputGroupAddon align="block-end" className="flex-wrap justify-between gap-x-2 gap-y-1.5">
+                    <div className="flex min-w-0 items-center gap-2"><button type="button" className="shrink-0 text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={() => openCorrection('persona')} disabled={generating}>修正人设</button><span className="shrink-0 text-border">·</span><button type="button" className="shrink-0 text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={() => openCorrection('memory')} disabled={generating}>修正记忆</button><select aria-label="回复长度" value={replyLength} onChange={(event) => setReplyLength(saveReplyLength(conversation.id, event.target.value))} disabled={generating} className="max-w-20 bg-transparent text-xs text-muted-foreground outline-none"><option value="short">简短</option><option value="standard">标准</option><option value="detailed">详细</option><option value="long">超长</option></select></div>
+                    <div className="ml-auto flex shrink-0 items-center gap-2"><ModelReasoningSelector providers={providers} providersLoading={providersLoading} reasoningEffort={reasoningEffort} disabled={generating || conversation.status !== 'active'} onReasoningEffortChange={(effort) => setReasoningEffort(saveReasoningEffort(conversation.id, effort))} onProvidersRefresh={refreshProviders} />{generating ? <InputGroupButton variant="outline" className="rounded-full" onClick={() => void stop()}><Square data-icon="inline-start" />停止</InputGroupButton> : <InputGroupButton variant="default" className="rounded-full" disabled={!input.trim() || conversation.status !== 'active'} onClick={() => void submit(input)}><Send data-icon="inline-start" />发送</InputGroupButton>}</div>
+                  </InputGroupAddon>
+                </InputGroup>
+              </div>
             </div>
           </div>
         </div>
-        {panelOpen && <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-border/60 bg-secondary/30 lg:block xl:w-96"><StatusPanel state={state} conversation={conversation} memorySummary={memorySummary} onAddLog={addManualLog} /></aside>}
+        {panelOpen && <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-border/60 bg-secondary/30 lg:block xl:w-96"><StatusPanel state={state} conversation={conversation} memorySummary={memorySummary} onAddLog={addManualLog} playerAvatarUrl={session.user?.avatar_url} playerUsername={session.user?.username} /></aside>}
       </div>
 
       <Dialog open={!!correctTarget} onOpenChange={(open) => !open && setCorrectTarget(null)}>
@@ -412,7 +468,7 @@ export function AdventureView() {
       </Dialog>
 
       <Dialog open={onboardingOpen} onOpenChange={setOnboardingOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg"><DialogHeader><DialogTitle>开局设定</DialogTitle><DialogDescription>{conversation.onboarding_config?.intro || '这份设定会在之后的剧情中持续生效。'}</DialogDescription></DialogHeader><div className="grid gap-4">{(conversation.onboarding_config?.fields || []).map((field) => <label key={field.key} className="grid gap-2 text-sm font-medium"><span>{field.label}{field.required && <span className="ml-1 text-primary">*</span>}</span>{field.type === 'textarea' ? <Textarea rows={3} value={onboardingValues[field.key] || ''} placeholder={field.placeholder} onChange={(event) => setOnboardingValues((previous) => ({ ...previous, [field.key]: event.target.value }))} /> : field.type === 'select' ? <select value={onboardingValues[field.key] || ''} onChange={(event) => setOnboardingValues((previous) => ({ ...previous, [field.key]: event.target.value }))} className="h-10 rounded-xl border border-input bg-transparent px-3 text-sm font-normal"><option value="">请选择</option>{(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}</select> : <Input value={onboardingValues[field.key] || ''} placeholder={field.placeholder} onChange={(event) => setOnboardingValues((previous) => ({ ...previous, [field.key]: event.target.value }))} />}</label>)}{conversation.onboarding_config?.allow_freeform && <label className="grid gap-2 text-sm font-medium"><span>补充设定</span><Textarea rows={3} value={onboardingValues.freeform || ''} placeholder="补充希望保留的背景、关系或叙事偏好。" onChange={(event) => setOnboardingValues((previous) => ({ ...previous, freeform: event.target.value }))} /></label>}</div><DialogFooter><Button variant="ghost" onClick={() => setOnboardingOpen(false)} disabled={onboardingSaving}>取消</Button><Button onClick={() => void saveOnboarding()} disabled={onboardingSaving}>{onboardingSaving ? '正在保存…' : '保存设定'}</Button></DialogFooter></DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg"><DialogHeader><DialogTitle>开局设定</DialogTitle><DialogDescription>{conversation.onboarding_config?.intro || '这份设定会在之后的剧情中持续生效。'}</DialogDescription></DialogHeader><div className="grid gap-4">{(conversation.onboarding_config?.fields || []).map((field) => <label key={field.key} className="grid gap-2 text-sm font-medium"><span>{field.label}{field.required && <span className="ml-1 text-primary">*</span>}</span>{field.type === 'textarea' ? <Textarea rows={3} value={onboardingValues[field.key] || ''} placeholder={field.placeholder} onChange={(event) => setOnboardingValues((previous) => ({ ...previous, [field.key]: event.target.value }))} /> : field.type === 'select' ? <select value={onboardingValues[field.key] || ''} onChange={(event) => setOnboardingValues((previous) => ({ ...previous, [field.key]: event.target.value }))} className="h-10 rounded-xl border border-input bg-transparent px-3 text-sm font-normal"><option value="">请选择</option>{(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}</select> : <Input value={onboardingValues[field.key] || ''} placeholder={field.placeholder} onChange={(event) => setOnboardingValues((previous) => ({ ...previous, [field.key]: event.target.value }))} />}</label>)}<label className="grid gap-2 text-sm font-medium"><span>{onboardingExtraLabel}</span><Textarea rows={3} value={onboardingValues[onboardingExtraKey] || ''} placeholder="补充希望保留的身份、背景、关系或叙事偏好。" onChange={(event) => setOnboardingValues((previous) => ({ ...previous, [onboardingExtraKey]: event.target.value }))} /></label></div><DialogFooter><Button variant="ghost" onClick={() => setOnboardingOpen(false)} disabled={onboardingSaving}>取消</Button><Button onClick={() => void saveOnboarding()} disabled={onboardingSaving}>{onboardingSaving ? '正在保存…' : '保存设定'}</Button></DialogFooter></DialogContent>
       </Dialog>
 
       <Dialog open={snapshotsOpen} onOpenChange={setSnapshotsOpen}>
@@ -428,11 +484,12 @@ function AdventureEmpty({ title, description, actionHref, actionLabel }: { title
   return <div className="flex min-h-svh items-center justify-center bg-background p-6"><Empty className="max-w-md rounded-3xl border border-dashed border-border bg-card/50 py-14"><EmptyHeader><EmptyMedia variant="icon"><Sparkles /></EmptyMedia><EmptyTitle>{title}</EmptyTitle><EmptyDescription>{description}</EmptyDescription></EmptyHeader><EmptyContent><Button className="rounded-full" render={<Link href={actionHref} />} nativeButton={false}>{actionLabel}</Button></EmptyContent></Empty></div>
 }
 
-function MessageBlock({ message, onCorrect }: { message: StoryMessage; onCorrect: () => void }) {
+function MessageBlock({ message, onCorrect, storyFontSize }: { message: StoryMessage; onCorrect: () => void; storyFontSize: number }) {
   if (message.role === 'system') return <div className="flex items-center gap-3 py-1"><Separator className="flex-1" /><span className="shrink-0 text-xs text-muted-foreground">{message.content}</span><Separator className="flex-1" /></div>
-  if (message.role === 'user') return <div className="flex flex-col items-end gap-1"><div className="max-w-[85%] rounded-3xl rounded-tr-md bg-primary px-4 py-3 text-primary-foreground shadow-sm"><p className="whitespace-pre-wrap leading-relaxed">{message.content}</p></div><span className="pr-2 text-xs text-muted-foreground">{formatTime(message.created_at)}</span></div>
+  const messageDetails = [formatTime(message.created_at), `${countMessageCharacters(message.content)} 字`].filter(Boolean).join(' · ')
+  if (message.role === 'user') return <div className="flex flex-col items-end"><div className="relative max-w-[85%] rounded-3xl rounded-tr-md bg-primary px-4 py-3 pb-7 text-primary-foreground shadow-sm"><p className="whitespace-pre-wrap leading-relaxed">{message.content}</p><span className="absolute right-4 bottom-2 text-[11px] text-primary-foreground/70">{messageDetails}</span></div></div>
 
-  return <div className="group flex flex-col gap-2"><div className="min-h-12 rounded-3xl rounded-tl-md bg-card p-5 shadow-sm"><p className="whitespace-pre-wrap font-serif text-[15px] leading-loose text-foreground">{message.content || '…'}</p></div><div className="flex items-center gap-1 px-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"><span className="mr-1 flex items-center gap-2 text-xs text-muted-foreground">{message.token_count > 0 && <Badge variant="secondary" className="rounded-full px-2 py-0 text-[11px]">{message.token_count} tokens</Badge>}<span>{formatTime(message.created_at)}</span></span><div className="ml-auto flex items-center gap-0.5"><MetaAction icon={Flag} label="纠正后续剧情" onClick={onCorrect} /><MetaAction icon={Copy} label="复制" onClick={() => { void navigator.clipboard?.writeText(message.content); toast.success('已复制到剪贴板') }} /></div></div></div>
+  return <div className="group flex flex-col gap-2"><div className="relative min-h-12 rounded-3xl rounded-tl-md bg-card p-5 pb-9 shadow-sm"><p className="whitespace-pre-wrap font-serif leading-loose text-foreground" style={{ fontSize: `${storyFontSize}px` }}>{message.content || '…'}</p><span className="absolute right-5 bottom-3 text-[11px] text-muted-foreground">{messageDetails}</span></div><div className="flex items-center gap-1 px-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"><span className="mr-1 flex items-center gap-2 text-xs text-muted-foreground">{message.token_count > 0 && <Badge variant="secondary" className="rounded-full px-2 py-0 text-[11px]">{message.token_count} tokens</Badge>}</span><div className="ml-auto flex items-center gap-0.5"><MetaAction icon={Flag} label="纠正后续剧情" onClick={onCorrect} /><MetaAction icon={Copy} label="复制" onClick={() => { void navigator.clipboard?.writeText(message.content); toast.success('已复制到剪贴板') }} /></div></div></div>
 }
 
 function MetaAction({ icon: Icon, label, onClick }: { icon: React.ElementType; label: string; onClick: () => void }) {

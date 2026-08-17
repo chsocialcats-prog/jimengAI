@@ -255,6 +255,7 @@ def _stream_chat(
     """SSE 生成器：先写玩家消息，再按指令或 AI 客户端产出事件。"""
     conversation_id = _conversation_id(access)
     user_id = _user_id(access)
+    conversation_repository.set_pending_options(conversation_id, user_id, [])
     conversation_repository.create_message(
         conversation_id,
         user_id,
@@ -607,6 +608,9 @@ def _stream_ai_reply(
             content=emitted,
             metadata=metadata,
             token_count=completion_tokens,
+        )
+        conversation_repository.set_pending_options(
+            conversation_id, user_id, metadata["options"]
         )
         snapshot_service.autosave(access, note="流式回复后自动存档")
         yield sse("state", _state_event(access))

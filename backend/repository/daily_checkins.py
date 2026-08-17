@@ -9,6 +9,7 @@ import json
 from typing import Any
 
 from .. import database
+from ..services.holiday_calendar import festival_fortune_for, festival_metadata_for, festivals_for_month
 
 
 _CHECKIN_TIMEZONE = timezone(timedelta(hours=8), "Asia/Shanghai")
@@ -37,6 +38,9 @@ def _current_time(now: datetime | None = None) -> datetime:
 
 
 def _fortune_for(user_id: int, checkin_date: str) -> dict[str, str]:
+    festival_fortune = festival_fortune_for(date.fromisoformat(checkin_date))
+    if festival_fortune:
+        return festival_fortune
     digest = hashlib.sha256(f"{user_id}:{checkin_date}:{_FORTUNE_VERSION}".encode("utf-8")).digest()
     return dict(_FORTUNES[int.from_bytes(digest, "big") % len(_FORTUNES)])
 
@@ -113,11 +117,16 @@ def _status_in_connection(connection, user_id: int, current: datetime) -> dict:
         "SELECT COALESCE(SUM(points_awarded), 0) FROM daily_checkins WHERE user_id = ?",
         (user_id,),
     ).fetchone()[0]
+    festival = festival_metadata_for(current.date())
+    fortune = _read_fortune(row["fortune_json"]) if row is not None else None
+    if fortune is not None and festival is not None:
+        fortune = _fortune_for(user_id, checkin_date)
+        fortune["festival"] = festival
     return {
         "date": checkin_date,
         "checked_in": row is not None,
         "checked_in_at": row["checked_in_at"] if row is not None else None,
-        "fortune": _read_fortune(row["fortune_json"]) if row is not None else None,
+        "fortune": fortune,
         "streak_days": row["streak_days"] if row is not None else 0,
         "points_awarded": row["points_awarded"] if row is not None else 0,
         "points_total": points_total,
@@ -133,6 +142,31 @@ def get_status(user_id: int, *, now: datetime | None = None, connect_fn=database
         result = _status_in_connection(connection, user_id, current)
         connection.commit()
         return result
+
+
+def get_current_month_checkins(user_id: int, *, now: datetime | None = None, connect_fn=database.connect) -> dict:
+    """Return the authenticated user's check-in dates for the China-local current month."""
+    current = _current_time(now)
+    month_start = current.date().replace(day=1)
+    next_month = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+    with closing(connect_fn()) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        _backfill_user_records(connection, user_id)
+        rows = connection.execute(
+            """
+            SELECT checkin_date
+            FROM daily_checkins
+            WHERE user_id = ? AND checkin_date >= ? AND checkin_date < ?
+            ORDER BY checkin_date ASC
+            """,
+            (user_id, month_start.isoformat(), next_month.isoformat()),
+        ).fetchall()
+        connection.commit()
+    return {
+        "month": month_start.strftime("%Y-%m"),
+        "checkin_dates": [row["checkin_date"] for row in rows],
+        "festivals": festivals_for_month(month_start),
+    }
 
 
 def check_in(user_id: int, *, now: datetime | None = None, connect_fn=database.connect) -> dict:

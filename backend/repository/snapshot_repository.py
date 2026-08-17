@@ -9,6 +9,7 @@ from .conversation_repository import (
     _save_memory_summary_in_connection,
     _save_state_in_connection,
     get_state,
+    normalize_pending_options,
 )
 from .normalizers import normalize_state
 
@@ -35,12 +36,16 @@ def row_to_snapshot(row, include_private=False):
             if data.get("memory_corrections") is None
             else database.json_loads(data.get("memory_corrections"), [])
         )
+        data["pending_options"] = normalize_pending_options(
+            database.json_loads(data.get("pending_options"), [])
+        )
     else:
         data.pop("messages", None)
         data.pop("memory_summary", None)
         data.pop("memory_summary_covered_until_sequence", None)
         data.pop("persona_corrections", None)
         data.pop("memory_corrections", None)
+        data.pop("pending_options", None)
     return data
 
 
@@ -77,8 +82,8 @@ def _insert_snapshot(connection, values):
         INSERT INTO snapshots (
             conversation_id, name, state, messages, memory_summary,
             memory_summary_covered_until_sequence, persona_corrections,
-            memory_corrections, branch_label, note, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            memory_corrections, pending_options, branch_label, note, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         values,
     ).lastrowid
@@ -112,7 +117,8 @@ def create_snapshot(
             connection, conversation_id
         )
         conversation_row = connection.execute(
-            "SELECT persona_corrections, memory_corrections FROM conversations WHERE id = ?",
+            "SELECT persona_corrections, memory_corrections, pending_options "
+            "FROM conversations WHERE id = ?",
             (conversation_id,),
         ).fetchone()
         persona_corrections = (
@@ -120,6 +126,9 @@ def create_snapshot(
         )
         memory_corrections = (
             conversation_row["memory_corrections"] if conversation_row is not None else "[]"
+        )
+        pending_options = (
+            conversation_row["pending_options"] if conversation_row is not None else "[]"
         )
 
         if autosave:
@@ -135,6 +144,7 @@ def create_snapshot(
                     UPDATE snapshots SET state = ?, messages = ?,
                         memory_summary = ?, memory_summary_covered_until_sequence = ?,
                         persona_corrections = ?, memory_corrections = ?,
+                        pending_options = ?,
                         branch_label = ?, note = ?,
                         created_at = ?
                     WHERE id = ?
@@ -146,6 +156,7 @@ def create_snapshot(
                         memory_record["covered_until_sequence"],
                         persona_corrections,
                         memory_corrections,
+                        pending_options,
                         branch_label,
                         note or "自动存档",
                         now,
@@ -164,6 +175,7 @@ def create_snapshot(
                         memory_record["covered_until_sequence"],
                         persona_corrections,
                         memory_corrections,
+                        pending_options,
                         branch_label,
                         note or "自动存档",
                         now,
@@ -181,6 +193,7 @@ def create_snapshot(
                     memory_record["covered_until_sequence"],
                     persona_corrections,
                     memory_corrections,
+                    pending_options,
                     branch_label,
                     note,
                     now,
@@ -231,6 +244,7 @@ def restore_snapshot(
             UPDATE conversations SET current_state = ?, status = 'active',
                 persona_corrections = COALESCE(?, persona_corrections),
                 memory_corrections = COALESCE(?, memory_corrections),
+                pending_options = ?,
                 branch_label = ?, updated_at = ?, last_message_at = ?
             WHERE id = ?
             """,
@@ -238,6 +252,7 @@ def restore_snapshot(
                 database.json_dumps(state),
                 None if snapshot.get("persona_corrections") is None else database.json_dumps(snapshot["persona_corrections"]),
                 None if snapshot.get("memory_corrections") is None else database.json_dumps(snapshot["memory_corrections"]),
+                database.json_dumps(snapshot.get("pending_options", [])),
                 snapshot.get("branch_label", ""),
                 now,
                 now,

@@ -1,0 +1,22 @@
+{
+  "app": {
+    "host": "127.0.0.1",
+    "port": 8000,
+    "open_browser": true
+  },
+  "deepseek": {
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-chat",
+    "api_key": "",
+    "timeout_seconds": 60
+  },
+  "generation": {
+    "temperature": 0.8,
+    "max_tokens": 4096,
+    "reasoning_effort": "high",
+    "context_window_tokens": 32768,
+    "compression_trigger_ratio": 0.75,
+    "compression_keep_recent_messages": 8,
+    "compression_summary_max_tokens": 1200
+  }
+}

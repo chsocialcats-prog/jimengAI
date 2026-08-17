@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     onboarding_answers TEXT NOT NULL DEFAULT '{}'
     ,persona_corrections TEXT NOT NULL DEFAULT '[]'
     ,memory_corrections TEXT NOT NULL DEFAULT '[]'
+    ,pending_options TEXT NOT NULL DEFAULT '[]'
 );
 
 -- 消息：角色、玩家和系统产生的文本
@@ -135,6 +136,7 @@ CREATE TABLE IF NOT EXISTS snapshots (
     memory_summary_covered_until_sequence INTEGER NOT NULL DEFAULT -1,
     persona_corrections TEXT,
     memory_corrections TEXT,
+    pending_options TEXT NOT NULL DEFAULT '[]',
     branch_label TEXT NOT NULL DEFAULT '',
     note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
@@ -478,6 +480,7 @@ def init_db():
             _ensure_column(connection, "conversations", "onboarding_answers", "ALTER TABLE conversations ADD COLUMN onboarding_answers TEXT NOT NULL DEFAULT '{}'")
             _ensure_column(connection, "conversations", "persona_corrections", "ALTER TABLE conversations ADD COLUMN persona_corrections TEXT NOT NULL DEFAULT '[]'")
             _ensure_column(connection, "conversations", "memory_corrections", "ALTER TABLE conversations ADD COLUMN memory_corrections TEXT NOT NULL DEFAULT '[]'")
+            _ensure_column(connection, "conversations", "pending_options", "ALTER TABLE conversations ADD COLUMN pending_options TEXT NOT NULL DEFAULT '[]'")
             _ensure_column(connection, "conversations", "card_snapshot", "ALTER TABLE conversations ADD COLUMN card_snapshot TEXT NOT NULL DEFAULT '{}'")
             _ensure_column(
                 connection,
@@ -518,6 +521,12 @@ def init_db():
                 "snapshots",
                 "memory_corrections",
                 "ALTER TABLE snapshots ADD COLUMN memory_corrections TEXT",
+            )
+            _ensure_column(
+                connection,
+                "snapshots",
+                "pending_options",
+                "ALTER TABLE snapshots ADD COLUMN pending_options TEXT NOT NULL DEFAULT '[]'",
             )
             _ensure_column(
                 connection,

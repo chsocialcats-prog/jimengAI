@@ -79,6 +79,10 @@ class ChatReplyLengthTests(unittest.TestCase):
             ),
             patch.object(
                 chat_routes.conversation_repository,
+                "set_pending_options",
+            ),
+            patch.object(
+                chat_routes.conversation_repository,
                 "get_message",
                 return_value={"metadata": {"status": "done"}},
             ),
@@ -140,6 +144,31 @@ class ChatReplyLengthTests(unittest.TestCase):
         list(chat_routes._stream_ai_reply(self.access, self.stop_event, {}, self.effective_config))
 
         self.assertIsNone(self.client.calls[0]["max_tokens"])
+
+    def test_turn_options_are_persisted_and_cleared_when_the_player_acts(self):
+        chat_routes.adventure_engine.default_turn_options.return_value = [
+            "查看门锁", "前往走廊"
+        ]
+        list(chat_routes._stream_ai_reply(self.access, self.stop_event, {}, self.effective_config))
+
+        chat_routes.conversation_repository.set_pending_options.assert_called_once_with(
+            7, 1, ["查看门锁", "前往走廊"]
+        )
+        chat_routes.conversation_repository.set_pending_options.reset_mock()
+        with patch.object(chat_routes, "_stream_ai_reply", return_value=iter(())):
+            list(
+                chat_routes._stream_chat(
+                    self.access,
+                    "查看门锁",
+                    {},
+                    self.stop_event,
+                    self.effective_config,
+                    None,
+                )
+            )
+        chat_routes.conversation_repository.set_pending_options.assert_called_once_with(
+            7, 1, []
+        )
 
     def test_selected_reasoning_effort_overrides_only_the_current_turn(self):
         captured = []

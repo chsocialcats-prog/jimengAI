@@ -102,6 +102,7 @@ class SnapshotRepositoryCleanupTests(IsolatedDatabaseTestCase):
                 -1,
                 persona_corrections,
                 memory_corrections,
+                "[]",
                 "",
                 "",
                 database.now_str(),

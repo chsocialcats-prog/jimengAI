@@ -18,6 +18,8 @@ type StatusEntry = {
   id: string
   kind: 'character' | 'player'
   name: string
+  avatar_url?: string
+  avatar_alt?: string
   attributes: Record<string, unknown>
   flags: unknown[]
   relation?: unknown
@@ -75,7 +77,7 @@ function normalizedName(name: string) {
   return name.trim()
 }
 
-function buildStatusEntries(state: AdventureState, conversation: Conversation): StatusEntry[] {
+function buildStatusEntries(state: AdventureState, conversation: Conversation, playerAvatarUrl?: string, playerUsername?: string): StatusEntry[] {
   const cards = roleCardsForConversation(conversation)
   const runtimeCharacters = new Map(
     Object.entries(recordValue(state.characters))
@@ -122,6 +124,8 @@ function buildStatusEntries(state: AdventureState, conversation: Conversation): 
     id: PLAYER_ENTRY_ID,
     kind: 'player',
     name: '玩家',
+    avatar_url: playerAvatarUrl,
+    avatar_alt: playerUsername ? `${playerUsername} 的头像` : '玩家头像',
     attributes: recordValue(state.attributes),
     flags: Array.isArray(state.flags) ? state.flags : [],
   })
@@ -158,12 +162,12 @@ function memoryUpdatedAt(value: string | null) {
   return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date)
 }
 
-export function StatusPanel({ state, conversation, memorySummary, onAddLog }: { state: AdventureState; conversation: Conversation; memorySummary: MemorySummary; onAddLog: (content: string) => Promise<void> }) {
+export function StatusPanel({ state, conversation, memorySummary, onAddLog, playerAvatarUrl, playerUsername }: { state: AdventureState; conversation: Conversation; memorySummary: MemorySummary; onAddLog: (content: string) => Promise<void>; playerAvatarUrl?: string; playerUsername?: string }) {
   const [selection, setSelection] = useState<{ conversationId: number; entryId: string } | null>(null)
   const [logEditorOpen, setLogEditorOpen] = useState(false)
   const [logDraft, setLogDraft] = useState('')
   const [logSaving, setLogSaving] = useState(false)
-  const entries = buildStatusEntries(state, conversation)
+  const entries = buildStatusEntries(state, conversation, playerAvatarUrl, playerUsername)
   const selectedEntry = (selection?.conversationId === conversation.id && entries.find((entry) => entry.id === selection.entryId)) || entries[0]
   const roleEntries = entries.filter((entry) => entry.kind === 'character')
   const playerEntry = entries.find((entry) => entry.kind === 'player')
@@ -246,7 +250,7 @@ function SelectedEntryDetail({ entry }: { entry: StatusEntry }) {
   const relations = relationRows(entry)
   const isPlayer = entry.kind === 'player'
 
-  return <div className="flex min-w-0 flex-col gap-4">
+  return <div className="flex min-w-0 flex-col gap-3">
     <div className="flex min-w-0 items-start gap-3">
       <EntityAvatar entry={entry} size="lg" className="size-14" />
       <div className="min-w-0 flex-1 pt-0.5">
@@ -256,7 +260,7 @@ function SelectedEntryDetail({ entry }: { entry: StatusEntry }) {
       </div>
     </div>
 
-    {!isPlayer && relations.length > 0 && <dl className="grid gap-1 border-y border-border/60 py-2 text-xs">{relations.map(([name, value]) => <div key={name} className="flex min-w-0 items-center justify-between gap-3"><dt className="shrink-0 text-muted-foreground">{name}</dt><dd className="truncate text-right font-medium text-foreground" title={displayValue(value)}>{displayValue(value)}</dd></div>)}</dl>}
+    {!isPlayer && relations.length > 0 && <dl className="grid gap-2 border-y border-border/60 py-2 text-xs">{relations.map(([name, value]) => <div key={name} className="grid min-w-0 grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-start gap-x-3"><dt className="break-words text-muted-foreground">{name}</dt><dd className="min-w-0 break-words text-left font-medium leading-5 text-foreground">{displayValue(value)}</dd></div>)}</dl>}
 
     <div className="flex flex-col gap-3">
       <SectionTitle icon={isPlayer ? UserRound : Sparkles}>{isPlayer ? '基础属性' : '实时属性'}</SectionTitle>
@@ -266,7 +270,8 @@ function SelectedEntryDetail({ entry }: { entry: StatusEntry }) {
 }
 
 function EntityAvatar({ entry, size = 'default', className }: { entry: StatusEntry; size?: 'default' | 'sm' | 'lg'; className?: string }) {
-  return <Avatar size={size} className={className}>{entry.card?.avatar_url && <AvatarImage src={entry.card.avatar_url} alt={`${entry.name} 头像`} />}<AvatarFallback>{entry.kind === 'player' ? <UserRound className="size-4" aria-hidden /> : entry.name.slice(0, 1)}</AvatarFallback></Avatar>
+  const avatarUrl = entry.kind === 'player' ? entry.avatar_url : entry.card?.avatar_url
+  return <Avatar size={size} className={className}>{avatarUrl && <AvatarImage src={avatarUrl} alt={entry.avatar_alt || `${entry.name} 头像`} />}<AvatarFallback>{entry.kind === 'player' ? <UserRound className="size-4" aria-hidden /> : entry.name.slice(0, 1)}</AvatarFallback></Avatar>
 }
 
 function AttributeList({ attributes, emptyText }: { attributes: Record<string, unknown>; emptyText: string }) {

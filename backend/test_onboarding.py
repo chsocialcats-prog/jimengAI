@@ -48,6 +48,28 @@ class OnboardingTests(IsolatedDatabaseTestCase):
         self.assertEqual(completed["onboarding_status"], "completed")
         self.assertEqual(completed["onboarding_answers"]["player_role"], "哲")
         self.assertIn("哲", adventure_engine.build_messages(self.access_for(completed))[0]["content"])
+        opening_messages = [
+            message for message in repositories.get_messages(conversation["id"], self.test_user.id)
+            if message["metadata"].get("kind") == "opening"
+        ]
+        self.assertEqual(len(opening_messages), 1)
+
+        repositories.complete_conversation_onboarding(
+            conversation["id"], {"player_role": "行者"}, user_id=self.test_user.id
+        )
+        opening_messages = [
+            message for message in repositories.get_messages(conversation["id"], self.test_user.id)
+            if message["metadata"].get("kind") == "opening"
+        ]
+        self.assertEqual(len(opening_messages), 1)
+
+    def test_completion_persists_custom_opening_setting_without_configured_fields(self):
+        conversation = repositories.create_conversation(self.work["id"], "测试", user_id=self.test_user.id)
+        completed = repositories.complete_conversation_onboarding(
+            conversation["id"], {"session_setup": "玩家是夜班店员"}, user_id=self.test_user.id
+        )
+        self.assertEqual(completed["onboarding_answers"]["session_setup"], "玩家是夜班店员")
+        self.assertIn("玩家是夜班店员", adventure_engine.build_messages(self.access_for(completed))[0]["content"])
 
 
 if __name__ == "__main__":

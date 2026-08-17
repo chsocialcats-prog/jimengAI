@@ -5,6 +5,7 @@ export type ApiStatus = 'not_checked' | 'checking' | 'online' | 'unconfigured' |
 export type ApiStatusSnapshot = {
   status: ApiStatus
   providerName: string
+  checkedAt: number
 }
 
 export type ApiStatusUpdatedDetail = ApiStatusSnapshot & {
@@ -14,6 +15,7 @@ export type ApiStatusUpdatedDetail = ApiStatusSnapshot & {
 export const API_STATUS_UPDATED_EVENT = 'neko-api-status-updated'
 
 const STORAGE_PREFIX = 'neko.api-status.v1.'
+const CACHE_DURATION_MS = 3 * 60 * 1000
 
 function storageKey(userId: number) {
   return `${STORAGE_PREFIX}${userId}`
@@ -28,6 +30,8 @@ function isCachedSnapshot(value: unknown): value is ApiStatusSnapshot {
   const snapshot = value as Partial<ApiStatusSnapshot>
   return (
     typeof snapshot.providerName === 'string'
+    && typeof snapshot.checkedAt === 'number'
+    && Number.isFinite(snapshot.checkedAt)
     && ['online', 'unconfigured', 'offline'].includes(snapshot.status || '')
   )
 }
@@ -57,11 +61,17 @@ function saveApiStatus(userId: number, snapshot: ApiStatusSnapshot) {
   }
 }
 
-export async function refreshApiStatus(userId: number): Promise<ApiStatusSnapshot> {
+export async function refreshApiStatus(userId: number, { force = false }: { force?: boolean } = {}): Promise<ApiStatusSnapshot> {
   const cached = getCachedApiStatus(userId)
-  notify(userId, { status: 'checking', providerName: cached?.providerName || 'API' })
+  const cachedAge = cached ? Date.now() - cached.checkedAt : Number.POSITIVE_INFINITY
+  if (!force && cached && cachedAge >= 0 && cachedAge < CACHE_DURATION_MS) {
+    notify(userId, cached)
+    return cached
+  }
 
-  let next: ApiStatusSnapshot
+  notify(userId, { status: 'checking', providerName: cached?.providerName || 'API', checkedAt: cached?.checkedAt || 0 })
+
+  let next: Omit<ApiStatusSnapshot, 'checkedAt'>
   try {
     const settings = await api.getSettings()
     const activeProvider = settings.providers?.find((provider) => provider.is_active)
@@ -80,7 +90,8 @@ export async function refreshApiStatus(userId: number): Promise<ApiStatusSnapsho
     next = { status: 'offline', providerName: cached?.providerName || 'API' }
   }
 
-  saveApiStatus(userId, next)
-  notify(userId, next)
-  return next
+  const snapshot = { ...next, checkedAt: Date.now() }
+  saveApiStatus(userId, snapshot)
+  notify(userId, snapshot)
+  return snapshot
 }

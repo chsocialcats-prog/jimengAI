@@ -13,6 +13,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { api, type ModelProvider, type ProviderCatalogItem, type ProviderDraft, type Settings } from '@/lib/api'
+import { refreshApiStatus } from '@/lib/api-status'
 import { useSession } from '@/components/session-provider'
 
 const defaultGeneration = { temperature: 0.8, maxTokens: 4096, contextWindowTokens: 32768, compressionTriggerRatio: 0.75 }
@@ -190,6 +191,7 @@ export function SettingsView() {
         await api.createProvider(payload)
       }
       await load()
+      if (session.user) void refreshApiStatus(session.user.id, { force: true })
       setEditor(null)
       setModelDraft('')
       toast.success('提供方已保存并设为当前连接')
@@ -205,6 +207,7 @@ export function SettingsView() {
       await api.activateProvider(providerId)
       const result = await api.listProviders()
       setProviders(result.items || [])
+      if (session.user) void refreshApiStatus(session.user.id, { force: true })
       toast.success('已切换当前模型连接')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '切换连接失败')
@@ -218,6 +221,7 @@ export function SettingsView() {
       await api.deleteProvider(provider.provider_id)
       const result = await api.listProviders()
       setProviders(result.items || [])
+      if (session.user) void refreshApiStatus(session.user.id, { force: true })
       if (editor?.kind === 'edit' && editor.providerId === provider.provider_id) setEditor(null)
       toast.success('提供方已删除')
     } catch (error) {

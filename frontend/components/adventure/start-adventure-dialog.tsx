@@ -97,7 +97,7 @@ export function StartAdventureDialog({
       await api.completeOnboarding(conversation.id, values)
       toast.success('新存档已创建')
       close()
-      router.push(`/adventure?conversation=${conversation.id}`)
+      router.push(`/adventure?conversation=${conversation.id}&new=1`)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '无法创建存档')
     } finally {

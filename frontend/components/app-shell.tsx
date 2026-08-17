@@ -2,21 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
-import { Sparkles, Library, Boxes, Bookmark, Menu, User, Info, LogOut, Settings, LogIn } from 'lucide-react'
-import { toast } from 'sonner'
+import { usePathname } from 'next/navigation'
+import { Sparkles, Library, Boxes, Bookmark, Menu } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import {
   Sheet,
   SheetContent,
@@ -26,8 +16,8 @@ import {
 } from '@/components/ui/sheet'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { FloatingQuickActions } from '@/components/floating-quick-actions'
-import { api } from '@/lib/api'
-import { API_STATUS_UPDATED_EVENT, getCachedApiStatus, type ApiStatus, type ApiStatusUpdatedDetail } from '@/lib/api-status'
+import { AccountMenu } from '@/components/account-menu'
+import { API_STATUS_UPDATED_EVENT, getCachedApiStatus, refreshApiStatus, type ApiStatus, type ApiStatusUpdatedDetail } from '@/lib/api-status'
 import { useSession } from '@/components/session-provider'
 
 const navItems = [
@@ -104,86 +94,6 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
   )
 }
 
-function AccountMenu() {
-  const router = useRouter()
-  const { session, loading, setSession, user } = useSession()
-
-  if (loading) {
-    return (
-      <div className="flex size-9 items-center justify-center" aria-label="正在检查登录状态" role="status">
-        <span className="size-8 rounded-full bg-muted" aria-hidden="true" />
-      </div>
-    )
-  }
-
-  if (!session.authenticated || !user) {
-    return (
-      <Button variant="outline" size="sm" className="rounded-full" render={<Link href="/login" />} nativeButton={false}>
-        <LogIn data-icon="inline-start" />
-        登录
-      </Button>
-    )
-  }
-
-  const logout = async () => {
-    try {
-      await api.logout()
-      setSession({ authenticated: false, user: null })
-      toast.success('已退出登录')
-      router.push('/')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '退出失败')
-    }
-  }
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <button className="flex items-center gap-2 rounded-full p-0.5 pr-1 outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50">
-            <Avatar className="size-8">
-              {user.avatar_url && <AvatarImage src={user.avatar_url} alt={`${user.username} 的头像`} />}
-              <AvatarFallback>{user.username.slice(0, 1)}</AvatarFallback>
-            </Avatar>
-          </button>
-        }
-      />
-      <DropdownMenuContent align="end" className="w-60">
-        <div className="flex items-center gap-3 px-2 py-2">
-          <Avatar className="size-9">
-            {user.avatar_url && <AvatarImage src={user.avatar_url} alt={`${user.username} 的头像`} />}
-            <AvatarFallback>{user.username.slice(0, 1)}</AvatarFallback>
-          </Avatar>
-          <div className="flex flex-col">
-            <span className="text-sm font-semibold text-foreground">{user.username}</span>
-            <span className="text-xs text-muted-foreground">本地账户</span>
-          </div>
-        </div>
-        <DropdownMenuSeparator />
-        <DropdownMenuGroup>
-          <DropdownMenuItem render={<Link href="/account" />}>
-            <User className="size-4" />
-            账户信息
-          </DropdownMenuItem>
-          <DropdownMenuItem render={<Link href="/settings" />}>
-            <Settings className="size-4" />
-            设置
-          </DropdownMenuItem>
-          <DropdownMenuItem>
-            <Info className="size-4" />
-            关于织梦
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onClick={logout}>
-          <LogOut className="size-4" />
-          退出登录
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
-
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const { session, loading } = useSession()
@@ -209,6 +119,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setApiStatus(detail.status)
     }
     window.addEventListener(API_STATUS_UPDATED_EVENT, onStatusUpdated)
+    void refreshApiStatus(session.user.id)
     return () => window.removeEventListener(API_STATUS_UPDATED_EVENT, onStatusUpdated)
   }, [loading, session.authenticated, session.user])
 

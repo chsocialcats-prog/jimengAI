@@ -94,26 +94,32 @@ class ContextPersistenceTests(IsolatedDatabaseTestCase):
         self.assertEqual(record["covered_until_sequence"], -1)
         self.assertEqual(snapshot["memory_summary"], "legacy memory")
         self.assertEqual(snapshot["memory_summary_covered_until_sequence"], -1)
+        self.assertEqual(snapshot["pending_options"], [])
 
     def test_private_snapshot_captures_boundary_and_public_results_hide_private_data(self):
         conversation_id = self.conversation["id"]
         repositories.create_message(conversation_id, "user", "private message", user_id=self.test_user.id)
         repositories.save_memory_summary(conversation_id, "manual summary", 3, user_id=self.test_user.id)
+        repositories.set_pending_options(conversation_id, ["查看线索", "继续前进"], user_id=self.test_user.id)
         manual = repositories.create_snapshot(conversation_id, name="manual", user_id=self.test_user.id)
 
         private_manual = repositories.get_snapshot(manual["id"], self.test_user.id, include_private=True)
         self.assertIn("private message", [message["content"] for message in private_manual["messages"]])
         self.assertEqual(private_manual["memory_summary"], "manual summary")
         self.assertEqual(private_manual["memory_summary_covered_until_sequence"], 3)
+        self.assertEqual(private_manual["pending_options"], ["查看线索", "继续前进"])
 
         repositories.save_memory_summary(conversation_id, "autosave one", 4, user_id=self.test_user.id)
+        repositories.set_pending_options(conversation_id, ["调查门锁"], user_id=self.test_user.id)
         first_auto = repositories.create_snapshot(conversation_id, autosave=True, user_id=self.test_user.id)
         repositories.save_memory_summary(conversation_id, "autosave two", 8, user_id=self.test_user.id)
+        repositories.set_pending_options(conversation_id, ["返回大厅", "敲门"], user_id=self.test_user.id)
         second_auto = repositories.create_snapshot(conversation_id, autosave=True, user_id=self.test_user.id)
         private_auto = repositories.get_snapshot(second_auto["id"], self.test_user.id, include_private=True)
         self.assertEqual(second_auto["id"], first_auto["id"])
         self.assertEqual(private_auto["memory_summary"], "autosave two")
         self.assertEqual(private_auto["memory_summary_covered_until_sequence"], 8)
+        self.assertEqual(private_auto["pending_options"], ["返回大厅", "敲门"])
 
         public_items = repositories.list_snapshots(conversation_id, self.test_user.id)
         public_get = repositories.get_snapshot(manual["id"], self.test_user.id)
@@ -127,12 +133,14 @@ class ContextPersistenceTests(IsolatedDatabaseTestCase):
         repositories.save_state(conversation_id, {"money": 10, "flags": ["before"]}, user_id=self.test_user.id)
         repositories.create_message(conversation_id, "user", "before message", user_id=self.test_user.id)
         repositories.save_memory_summary(conversation_id, "before summary", 2, user_id=self.test_user.id)
+        repositories.set_pending_options(conversation_id, ["打开抽屉", "离开房间"], user_id=self.test_user.id)
         messages_at_snapshot = repositories.get_messages(conversation_id, self.test_user.id)
         snapshot = repositories.create_snapshot(conversation_id, name="branch", user_id=self.test_user.id)
 
         repositories.save_state(conversation_id, {"money": 99, "flags": ["after"]}, user_id=self.test_user.id)
         repositories.create_message(conversation_id, "assistant", "after message", user_id=self.test_user.id)
         repositories.save_memory_summary(conversation_id, "after summary", 7, user_id=self.test_user.id)
+        repositories.set_pending_options(conversation_id, ["继续追问"], user_id=self.test_user.id)
         repositories.restore_snapshot(conversation_id, snapshot["id"], user_id=self.test_user.id)
 
         self.assertEqual(repositories.get_state(conversation_id, user_id=self.test_user.id)["money"], 10)
@@ -144,6 +152,10 @@ class ContextPersistenceTests(IsolatedDatabaseTestCase):
         record = repositories.get_memory_summary_record(conversation_id, self.test_user.id)
         self.assertEqual(record["summary"], "before summary")
         self.assertEqual(record["covered_until_sequence"], 2)
+        self.assertEqual(
+            repositories.get_conversation(conversation_id, self.test_user.id)["pending_options"],
+            ["打开抽屉", "离开房间"],
+        )
 
     def test_restore_failure_rolls_back_state_messages_and_summary_atomically(self):
         conversation_id = self.conversation["id"]
@@ -192,6 +204,27 @@ class ContextPersistenceTests(IsolatedDatabaseTestCase):
         self.assertNotIn("messages", public_snapshot)
         self.assertNotIn("memory_summary", public_snapshot)
         self.assertNotIn("memory_summary_covered_until_sequence", public_snapshot)
+
+    def test_branch_from_snapshot_keeps_pending_options(self):
+        conversation_id = self.conversation["id"]
+        repositories.set_pending_options(
+            conversation_id, ["查看书架", "前往窗边"], user_id=self.test_user.id
+        )
+        snapshot = repositories.create_snapshot(
+            conversation_id, name="选项快照", user_id=self.test_user.id
+        )
+        repositories.set_pending_options(
+            conversation_id, ["不应继承"], user_id=self.test_user.id
+        )
+
+        branch = repositories.create_conversation_branch(
+            conversation_id,
+            "选项分支",
+            snapshot_id=snapshot["id"],
+            user_id=self.test_user.id,
+        )
+
+        self.assertEqual(branch["pending_options"], ["查看书架", "前往窗边"])
 
 
 if __name__ == "__main__":
