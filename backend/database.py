@@ -176,8 +176,6 @@ CREATE TABLE IF NOT EXISTS memory_summaries (
 
 CREATE INDEX IF NOT EXISTS idx_worldbook_entries_worldbook
     ON worldbook_entries(worldbook_id);
-CREATE INDEX IF NOT EXISTS idx_worldbook_entries_parent
-    ON worldbook_entries(worldbook_id, parent_entry_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_works_card ON works(card_id);
 CREATE INDEX IF NOT EXISTS idx_works_worldbook ON works(worldbook_id);
 CREATE INDEX IF NOT EXISTS idx_work_cards_work_position
