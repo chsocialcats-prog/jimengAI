@@ -1,7 +1,7 @@
 from contextlib import closing
 
 from .. import database
-from .cards import row_to_card
+from .cards import get_card, row_to_card
 from .works import (
     _insert_work_in_connection,
     _update_work_in_connection,
@@ -16,6 +16,25 @@ from .worldbooks import (
 
 class BundleOwnershipError(Exception):
     """A bundle update attempted to mutate a worldbook owned by another user."""
+
+
+def _insert_imported_entries(connection, worldbook_id, entries, *, now, parent_entry_id=None):
+    """Persist a V3 entry tree while retaining its native parent relationships."""
+    for position, source_entry in enumerate(entries):
+        entry = dict(source_entry)
+        children = entry.pop("children", [])
+        entry["parent_entry_id"] = parent_entry_id
+        entry["sort_order"] = position
+        entry_id = _insert_worldbook_entry_in_connection(
+            connection, worldbook_id, entry, now=now
+        )
+        _insert_imported_entries(
+            connection,
+            worldbook_id,
+            children if isinstance(children, list) else [],
+            now=now,
+            parent_entry_id=entry_id,
+        )
 
 
 def _save_bundle_entries(connection, worldbook_id, entries, now):
@@ -190,3 +209,123 @@ def save_import_bundle(
         "worldbook": get_worldbook(worldbook_id, viewer_user_id=owner_user_id),
         "work": get_work(work_id, viewer_user_id=owner_user_id),
     }
+
+
+def save_sillytavern_card_bundle(
+    card_data,
+    worldbook_data,
+    work_data,
+    *,
+    owner_user_id,
+    avatar_url="",
+    connect_fn=database.connect,
+):
+    """Save a V3 card, optional embedded lorebook and ready-to-play work atomically."""
+    now = database.now_str()
+    with closing(connect_fn()) as connection:
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            card_id = connection.execute(
+                """
+                INSERT INTO cards (
+                    owner_user_id, name, persona, personality, speaking_style,
+                    relationships, directives, initial_state, character_attributes,
+                    avatar_url, source, interop_data, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    owner_user_id,
+                    card_data.get("name", ""),
+                    card_data.get("persona", ""),
+                    card_data.get("personality", ""),
+                    card_data.get("speaking_style", ""),
+                    database.json_dumps(card_data.get("relationships", {})),
+                    database.json_dumps(card_data.get("directives", [])),
+                    database.json_dumps(card_data.get("initial_state", {})),
+                    database.json_dumps(card_data.get("character_attributes", {})),
+                    avatar_url,
+                    card_data.get("source", "sillytavern-v3"),
+                    database.json_dumps(card_data.get("interop_data", {})),
+                    now,
+                    now,
+                ),
+            ).lastrowid
+            worldbook_id = None
+            if worldbook_data is not None:
+                worldbook_id = connection.execute(
+                    """
+                    INSERT INTO worldbooks (
+                        owner_user_id, title, description, interop_data, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        owner_user_id,
+                        worldbook_data.get("title", ""),
+                        worldbook_data.get("description", ""),
+                        database.json_dumps(worldbook_data.get("interop_data", {})),
+                        now,
+                        now,
+                    ),
+                ).lastrowid
+                _insert_imported_entries(
+                    connection,
+                    worldbook_id,
+                    worldbook_data.get("entries", []),
+                    now=now,
+                )
+            work_id = _insert_work_in_connection(
+                connection,
+                {**work_data, "card_ids": [card_id]},
+                owner_user_id=owner_user_id,
+                worldbook_id=worldbook_id,
+                now=now,
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+    return {
+        "card": get_card(card_id, viewer_user_id=owner_user_id),
+        "worldbook": (
+            get_worldbook(worldbook_id, viewer_user_id=owner_user_id)
+            if worldbook_id is not None
+            else None
+        ),
+        "work": get_work(work_id, viewer_user_id=owner_user_id),
+    }
+
+
+def save_sillytavern_worldbook(
+    worldbook_data, *, owner_user_id, connect_fn=database.connect
+):
+    """Save one imported SillyTavern worldbook and all of its entry nodes."""
+    now = database.now_str()
+    with closing(connect_fn()) as connection:
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            worldbook_id = connection.execute(
+                """
+                INSERT INTO worldbooks (
+                    owner_user_id, title, description, interop_data, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    owner_user_id,
+                    worldbook_data.get("title", ""),
+                    worldbook_data.get("description", ""),
+                    database.json_dumps(worldbook_data.get("interop_data", {})),
+                    now,
+                    now,
+                ),
+            ).lastrowid
+            _insert_imported_entries(
+                connection,
+                worldbook_id,
+                worldbook_data.get("entries", []),
+                now=now,
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+    return get_worldbook(worldbook_id, viewer_user_id=owner_user_id)

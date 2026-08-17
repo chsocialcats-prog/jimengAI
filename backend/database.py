@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS cards (
     character_attributes TEXT NOT NULL DEFAULT '{}',
     avatar_url TEXT NOT NULL DEFAULT '',
     source TEXT NOT NULL DEFAULT 'local',
+    interop_data TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS worldbooks (
     owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     title TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
+    interop_data TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
@@ -53,6 +55,10 @@ CREATE TABLE IF NOT EXISTS worldbook_entries (
     content TEXT NOT NULL DEFAULT '',
     priority INTEGER NOT NULL DEFAULT 0,
     enabled INTEGER NOT NULL DEFAULT 1,
+    constant_injection INTEGER NOT NULL DEFAULT 0,
+    parent_entry_id INTEGER,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    interop_data TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
@@ -170,6 +176,8 @@ CREATE TABLE IF NOT EXISTS memory_summaries (
 
 CREATE INDEX IF NOT EXISTS idx_worldbook_entries_worldbook
     ON worldbook_entries(worldbook_id);
+CREATE INDEX IF NOT EXISTS idx_worldbook_entries_parent
+    ON worldbook_entries(worldbook_id, parent_entry_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_works_card ON works(card_id);
 CREATE INDEX IF NOT EXISTS idx_works_worldbook ON works(worldbook_id);
 CREATE INDEX IF NOT EXISTS idx_work_cards_work_position
@@ -294,6 +302,7 @@ def _backfill_conversation_card_snapshots(connection):
             ("directives", []),
             ("initial_state", {}),
             ("character_attributes", {}),
+            ("interop_data", {}),
         ):
             card[column] = json_loads(card[column], default)
         connection.execute(
@@ -464,6 +473,46 @@ def init_db():
                 "cards",
                 "avatar_url",
                 "ALTER TABLE cards ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''",
+            )
+            _ensure_column(
+                connection,
+                "cards",
+                "interop_data",
+                "ALTER TABLE cards ADD COLUMN interop_data TEXT NOT NULL DEFAULT '{}'",
+            )
+            _ensure_column(
+                connection,
+                "worldbooks",
+                "interop_data",
+                "ALTER TABLE worldbooks ADD COLUMN interop_data TEXT NOT NULL DEFAULT '{}'",
+            )
+            _ensure_column(
+                connection,
+                "worldbook_entries",
+                "constant_injection",
+                "ALTER TABLE worldbook_entries ADD COLUMN constant_injection INTEGER NOT NULL DEFAULT 0",
+            )
+            _ensure_column(
+                connection,
+                "worldbook_entries",
+                "parent_entry_id",
+                "ALTER TABLE worldbook_entries ADD COLUMN parent_entry_id INTEGER",
+            )
+            _ensure_column(
+                connection,
+                "worldbook_entries",
+                "sort_order",
+                "ALTER TABLE worldbook_entries ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+            )
+            _ensure_column(
+                connection,
+                "worldbook_entries",
+                "interop_data",
+                "ALTER TABLE worldbook_entries ADD COLUMN interop_data TEXT NOT NULL DEFAULT '{}'",
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_worldbook_entries_parent "
+                "ON worldbook_entries(worldbook_id, parent_entry_id, sort_order)"
             )
             _ensure_column(
                 connection,

@@ -12,6 +12,9 @@ def row_to_entry(row, viewer_user_id=None):
     data = dict(row)
     data["keywords"] = database.json_loads(data.get("keywords"), [])
     data["enabled"] = bool(data.get("enabled"))
+    data["constant"] = bool(data.get("constant_injection"))
+    data.pop("constant_injection", None)
+    data["interop_data"] = database.json_loads(data.get("interop_data"), {})
     return project_shared_resource(data, viewer_user_id)
 
 
@@ -19,6 +22,7 @@ def row_to_worldbook(row, viewer_user_id=None):
     if row is None:
         return None
     data = project_shared_resource(row, viewer_user_id)
+    data["interop_data"] = database.json_loads(data.get("interop_data"), {})
     data["referencing_works"] = [
         dict(work) for work in list_worldbook_references(data["id"])
     ]
@@ -54,7 +58,7 @@ def get_worldbook(worldbook_id, *, viewer_user_id=None):
     data = row_to_worldbook(row, viewer_user_id)
     entries = database.fetch_all(
         "SELECT * FROM worldbook_entries WHERE worldbook_id = ? "
-        "ORDER BY priority DESC, id ASC",
+        "ORDER BY parent_entry_id IS NOT NULL, parent_entry_id, sort_order ASC, id ASC",
         (worldbook_id,),
     )
     data["entries"] = [row_to_entry({**entry, "owner_user_id": data.get("owner_user_id"), "owner_username": data.get("owner_username")}, viewer_user_id) for entry in entries]
@@ -65,9 +69,12 @@ def create_worldbook(data, *, owner_user_id):
     """新增世界书。"""
     now = database.now_str()
     worldbook_id = database.execute(
-        "INSERT INTO worldbooks (owner_user_id, title, description, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (owner_user_id, data.get("title", ""), data.get("description", ""), now, now),
+        "INSERT INTO worldbooks (owner_user_id, title, description, interop_data, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            owner_user_id, data.get("title", ""), data.get("description", ""),
+            database.json_dumps(data.get("interop_data", {})), now, now,
+        ),
     )
     return get_worldbook(worldbook_id, viewer_user_id=owner_user_id)
 
@@ -82,6 +89,9 @@ def update_worldbook(worldbook_id, data, *, owner_user_id):
             if key in fields:
                 assignments.append(f"{key} = ?")
                 params.append(fields[key])
+        if "interop_data" in fields:
+            assignments.append("interop_data = ?")
+            params.append(database.json_dumps(fields["interop_data"]))
         if assignments:
             assignments.append("updated_at = ?")
             params.append(database.now_str())
@@ -137,7 +147,8 @@ def list_worldbook_entries(worldbook_id, page=1, page_size=20, *, viewer_user_id
         "FROM worldbook_entries JOIN worldbooks ON worldbooks.id = worldbook_entries.worldbook_id "
         "LEFT JOIN users ON users.id = worldbooks.owner_user_id "
         "WHERE worldbook_entries.worldbook_id = ? "
-        "ORDER BY worldbook_entries.priority DESC, worldbook_entries.id ASC LIMIT ? OFFSET ?",
+        "ORDER BY worldbook_entries.parent_entry_id IS NOT NULL, worldbook_entries.parent_entry_id, "
+        "worldbook_entries.sort_order ASC, worldbook_entries.id ASC LIMIT ? OFFSET ?",
         params + [page_size, (page - 1) * page_size],
     )
     return {
@@ -164,14 +175,18 @@ def _entry_storage_values(data, now=None):
     return (
         data.get("title", ""), database.json_dumps(data.get("keywords", [])),
         data.get("content", ""), int(data.get("priority", 0)),
-        int(bool(data.get("enabled", True))), now,
+        int(bool(data.get("enabled", True))), int(bool(data.get("constant", False))),
+        data.get("parent_entry_id"), int(data.get("sort_order", data.get("priority", 0))),
+        database.json_dumps(data.get("interop_data", {})), now,
     )
 
 
 def _insert_worldbook_entry_in_connection(connection, worldbook_id, data, *, now=None):
     values = _entry_storage_values(data, now)
     return connection.execute(
-        "INSERT INTO worldbook_entries (worldbook_id, title, keywords, content, priority, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO worldbook_entries (worldbook_id, title, keywords, content, priority, enabled, "
+        "constant_injection, parent_entry_id, sort_order, interop_data, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (worldbook_id, *values, values[-1]),
     ).lastrowid
 
@@ -185,16 +200,18 @@ def _update_worldbook_entry_in_connection(
     if worldbook_id is not None:
         connection.execute(
             "UPDATE worldbook_entries SET title = ?, keywords = ?, content = ?, priority = ?, enabled = ?, updated_at = ? WHERE id = ? AND worldbook_id = ?",
-            (*values, entry_id, worldbook_id),
+            (*values[:5], now, entry_id, worldbook_id),
         )
         return True
 
     assignments = []
     params = []
     for key, index in (("title", 0), ("content", 2), ("priority", 3),
-                       ("keywords", 1), ("enabled", 4)):
+                       ("keywords", 1), ("enabled", 4), ("constant", 5),
+                       ("parent_entry_id", 6), ("sort_order", 7), ("interop_data", 8)):
         if key in fields:
-            assignments.append(f"{key} = ?")
+            column = "constant_injection" if key == "constant" else key
+            assignments.append(f"{column} = ?")
             params.append(_entry_storage_values(fields, now)[index])
     if not assignments:
         return False

@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 """世界书与条目 CRUD 接口。"""
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 
 from ..repository import worldbooks as worldbook_repository
 from ..auth.dependencies import optional_user, require_user
@@ -11,6 +14,7 @@ from ..schemas import (
     WorldbookEntryUpdate,
     WorldbookUpdate,
 )
+from ..services.sillytavern import export_worldbook_document
 from ._error_helpers import (
     _raise_no_update_fields,
     _raise_not_found,
@@ -49,6 +53,19 @@ def create_worldbook(payload: WorldbookCreate, user=Depends(require_user)):
     if not data.get("title", "").strip():
         _raise_validation_error("世界书标题不能为空")
     return worldbook_repository.create_worldbook(data, owner_user_id=user.id)
+
+
+@router.get("/{worldbook_id}/exports/sillytavern", summary="导出 SillyTavern 世界书")
+def export_sillytavern_worldbook(worldbook_id: int, user=Depends(require_user)):
+    worldbook = _get_worldbook_or_404(worldbook_id, user)
+    if not worldbook["can_edit"]:
+        raise HTTPException(403, {"code": "forbidden", "message": "无权导出该世界书"})
+    document = export_worldbook_document(worldbook)
+    return Response(
+        content=json.dumps(document, ensure_ascii=False, indent=2).encode("utf-8"),
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=worldbook.json"},
+    )
 
 
 @router.get("/{worldbook_id}", summary="世界书详情")
@@ -105,6 +122,8 @@ def create_entry(worldbook_id: int, payload: WorldbookEntryCreate, user=Depends(
     data = payload.model_dump()
     if not data.get("title", "").strip():
         _raise_validation_error("条目标题不能为空")
+    if data.get("parent_entry_id") is not None:
+        _get_entry_or_404(data["parent_entry_id"], worldbook_id, user)
     return worldbook_repository.create_worldbook_entry(worldbook_id, data, owner_user_id=user.id)
 
 
@@ -125,6 +144,11 @@ def update_entry(
         _raise_no_update_fields()
     if data.get("title") is not None and not data["title"].strip():
         _raise_validation_error("条目标题不能为空")
+    parent_entry_id = data.get("parent_entry_id")
+    if parent_entry_id is not None:
+        if parent_entry_id == entry_id:
+            _raise_validation_error("条目不能作为自己的父条目")
+        _get_entry_or_404(parent_entry_id, worldbook_id, user)
     return worldbook_repository.update_worldbook_entry(entry_id, data, owner_user_id=user.id)
 
 

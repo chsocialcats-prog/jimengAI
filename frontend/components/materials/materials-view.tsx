@@ -97,6 +97,7 @@ export function MaterialsView() {
   const [fillMissingImagesOpen, setFillMissingImagesOpen] = useState(false)
   const [fillingMissingImages, setFillingMissingImages] = useState(false)
   const importFileRef = useRef<HTMLInputElement>(null)
+  const sillyTavernImportFileRef = useRef<HTMLInputElement>(null)
 
   const load = async () => {
     setLoading(true)
@@ -215,6 +216,47 @@ export function MaterialsView() {
     }
   }
 
+  const importSillyTavern = async (file: File) => {
+    try {
+      if (tab === 'character') {
+        const result = await api.importSillyTavernCard(file)
+        toast.success(`已导入「${result.card.name}」及配套作品`)
+        if (result.warnings.length) toast.warning(`已保留但当前不执行：${result.warnings.join('、')}`)
+      } else {
+        const result = await api.importSillyTavernWorldbook(file)
+        toast.success(`已导入世界书「${result.worldbook.title}」`)
+        if (result.warnings.length) toast.warning(`已保留但当前不执行：${result.warnings.join('、')}`)
+      }
+      await load()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '无法导入 SillyTavern 文件')
+    } finally {
+      if (sillyTavernImportFileRef.current) sillyTavernImportFileRef.current.value = ''
+    }
+  }
+
+  const download = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const exportSillyTavern = async (material: AnyMaterial, format: 'json' | 'png') => {
+    try {
+      if (material.kind === 'character') {
+        download(await api.exportSillyTavernCard(material.id, format), `${material.name}.${format}`)
+      } else {
+        download(await api.exportSillyTavernWorldbook(material.id), `${material.title}.json`)
+      }
+      toast.success('已导出 SillyTavern 文件')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '导出失败')
+    }
+  }
+
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-6 md:py-10">
       <header className="flex flex-col gap-2"><h1 className="font-serif text-2xl font-semibold tracking-tight md:text-3xl">创作素材库</h1><p className="text-pretty text-sm text-muted-foreground md:text-base">管理角色卡与世界书，可在作品编辑器中关联复用。</p></header>
@@ -223,14 +265,16 @@ export function MaterialsView() {
 
       <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
         <InputGroup className="rounded-full bg-card sm:max-w-xs"><InputGroupAddon><Search className="size-4 text-muted-foreground" /></InputGroupAddon><InputGroupInput placeholder={`搜索${activeTab.label}…`} value={query} onChange={(event) => setQuery(event.target.value)} /></InputGroup>
-        <div className="flex items-center gap-2 sm:ml-auto">
+        <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+          <input ref={sillyTavernImportFileRef} type="file" accept="application/json,.json,image/png,.png" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importSillyTavern(file) }} />
           {tab === 'character' && <><input ref={importFileRef} type="file" accept="application/json,.json" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importCardJson(file) }} /><Button variant="outline" className="rounded-full" disabled={!canWrite || missingAvatarCount === 0} onClick={() => setFillMissingImagesOpen(true)}><ImagePlus data-icon="inline-start" />补全配图 {missingAvatarCount > 0 ? `(${missingAvatarCount})` : ''}</Button><Button variant="outline" className="rounded-full" disabled={!canWrite} onClick={() => setImportOpen(true)}><Upload data-icon="inline-start" />导入文本</Button><Button variant="outline" className="rounded-full" disabled={!canWrite} onClick={() => importFileRef.current?.click()}><Upload data-icon="inline-start" />导入 JSON</Button></>}
+          <Button variant="outline" className="rounded-full" disabled={!canWrite} onClick={() => sillyTavernImportFileRef.current?.click()}><Upload data-icon="inline-start" />导入酒馆{tab === 'character' ? '卡' : '书'}</Button>
           <Button variant="outline" className="rounded-full" onClick={exportItems} disabled={list.length === 0}><Download data-icon="inline-start" />导出</Button>
           <Button className="rounded-full" disabled={!canWrite} onClick={() => setEditor({ kind: tab })}><Plus data-icon="inline-start" />新建</Button>
         </div>
       </div>
 
-      {loading ? <div className="mt-16 flex justify-center text-sm text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />正在读取素材…</div> : list.length === 0 ? <Empty className="mt-16"><EmptyHeader><EmptyMedia variant="icon"><Sparkles /></EmptyMedia><EmptyTitle>没有找到{activeTab.label}</EmptyTitle><EmptyDescription>{canWrite ? '换个关键词，或新建一个吧。' : '登录后可以创建和管理自己的素材。'}</EmptyDescription></EmptyHeader><EmptyContent>{canWrite && <Button className="rounded-full" onClick={() => setEditor({ kind: tab })}><Plus data-icon="inline-start" />新建{activeTab.label}</Button>}</EmptyContent></Empty> : <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">{list.map((material) => <MaterialCard key={`${material.kind}-${material.id}`} material={material} onOpen={() => setDetail(material)} onEdit={() => setEditor(material)} onDelete={() => setDeleteTarget(material)} />)}</div>}
+      {loading ? <div className="mt-16 flex justify-center text-sm text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />正在读取素材…</div> : list.length === 0 ? <Empty className="mt-16"><EmptyHeader><EmptyMedia variant="icon"><Sparkles /></EmptyMedia><EmptyTitle>没有找到{activeTab.label}</EmptyTitle><EmptyDescription>{canWrite ? '换个关键词，或新建一个吧。' : '登录后可以创建和管理自己的素材。'}</EmptyDescription></EmptyHeader><EmptyContent>{canWrite && <Button className="rounded-full" onClick={() => setEditor({ kind: tab })}><Plus data-icon="inline-start" />新建{activeTab.label}</Button>}</EmptyContent></Empty> : <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">{list.map((material) => <MaterialCard key={`${material.kind}-${material.id}`} material={material} onOpen={() => setDetail(material)} onEdit={() => setEditor(material)} onDelete={() => setDeleteTarget(material)} onExport={(format) => void exportSillyTavern(material, format)} />)}</div>}
 
       <MaterialDetailSheet material={detail} onOpenChange={(open) => !open && setDetail(null)} />
       <MaterialEditor editor={editor} onOpenChange={(open) => !open && setEditor(null)} onSaved={async () => { setEditor(null); await load() }} />
@@ -244,12 +288,12 @@ export function MaterialsView() {
   )
 }
 
-function MaterialCard({ material, onOpen, onEdit, onDelete }: { material: AnyMaterial; onOpen: () => void; onEdit: () => void; onDelete: () => void }) {
+function MaterialCard({ material, onOpen, onEdit, onDelete, onExport }: { material: AnyMaterial; onOpen: () => void; onEdit: () => void; onDelete: () => void; onExport: (format: 'json' | 'png') => void }) {
   const title = material.kind === 'character' ? material.name : material.title
   const description = material.kind === 'character' ? material.persona || material.personality || '尚未填写角色设定。' : material.description || '尚未填写世界书简介。'
   const Icon = material.kind === 'character' ? Users : BookMarked
   const referenceCount = material.referencing_works?.length || 0
-  return <Card className="group cursor-pointer gap-0 overflow-hidden p-4 transition-all hover:shadow-md hover:ring-1 hover:ring-primary/30" onClick={onOpen}><div className="flex items-start gap-3"><Avatar className="size-12">{material.kind === 'character' && material.avatar_url && <AvatarImage src={material.avatar_url} alt={`${material.name} 头像`} />}<AvatarFallback><Icon className="size-5" /></AvatarFallback></Avatar><div className="min-w-0 flex-1"><div className="flex items-start gap-2"><div className="min-w-0 flex-1"><h2 className="truncate font-medium text-foreground">{title}</h2><p className="mt-0.5 line-clamp-2 text-sm leading-relaxed text-muted-foreground">{description}</p></div>{material.can_edit && <DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" className="-mr-1 -mt-1 rounded-full" aria-label="素材操作" onClick={(event) => event.stopPropagation()}><MoreVertical /></Button>} /><DropdownMenuContent align="end"><DropdownMenuGroup><DropdownMenuItem onClick={(event) => { event.stopPropagation(); onEdit() }}><Pencil className="size-4" />编辑</DropdownMenuItem><DropdownMenuItem variant="destructive" onClick={(event) => { event.stopPropagation(); onDelete() }}><Trash2 className="size-4" />删除</DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent></DropdownMenu>}</div><div className="mt-3 flex flex-wrap gap-1.5"><Badge variant="secondary" className="rounded-full text-[11px]">{material.kind === 'character' ? '角色卡' : `${material.entries?.length || 0} 条世界书条目`}</Badge>{referenceCount > 0 && <Badge variant="outline" className="gap-1 rounded-full text-[11px]"><Link2 className="size-3" />被 {referenceCount} 个剧本引用</Badge>}{material.owner_username && <Badge variant="outline" className="rounded-full text-[11px]">{material.owner_username}</Badge>}</div></div></div></Card>
+  return <Card className="group cursor-pointer gap-0 overflow-hidden p-4 transition-all hover:shadow-md hover:ring-1 hover:ring-primary/30" onClick={onOpen}><div className="flex items-start gap-3"><Avatar className="size-12">{material.kind === 'character' && material.avatar_url && <AvatarImage src={material.avatar_url} alt={`${material.name} 头像`} />}<AvatarFallback><Icon className="size-5" /></AvatarFallback></Avatar><div className="min-w-0 flex-1"><div className="flex items-start gap-2"><div className="min-w-0 flex-1"><h2 className="truncate font-medium text-foreground">{title}</h2><p className="mt-0.5 line-clamp-2 text-sm leading-relaxed text-muted-foreground">{description}</p></div>{material.can_edit && <DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" className="-mr-1 -mt-1 rounded-full" aria-label="素材操作" onClick={(event) => event.stopPropagation()}><MoreVertical /></Button>} /><DropdownMenuContent align="end"><DropdownMenuGroup><DropdownMenuItem onClick={(event) => { event.stopPropagation(); onEdit() }}><Pencil className="size-4" />编辑</DropdownMenuItem>{material.kind === 'character' ? <><DropdownMenuItem onClick={(event) => { event.stopPropagation(); onExport('json') }}><Download className="size-4" />导出酒馆 JSON</DropdownMenuItem><DropdownMenuItem onClick={(event) => { event.stopPropagation(); onExport('png') }}><Download className="size-4" />导出酒馆 PNG</DropdownMenuItem></> : <DropdownMenuItem onClick={(event) => { event.stopPropagation(); onExport('json') }}><Download className="size-4" />导出酒馆世界书</DropdownMenuItem>}<DropdownMenuItem variant="destructive" onClick={(event) => { event.stopPropagation(); onDelete() }}><Trash2 className="size-4" />删除</DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent></DropdownMenu>}</div><div className="mt-3 flex flex-wrap gap-1.5"><Badge variant="secondary" className="rounded-full text-[11px]">{material.kind === 'character' ? '角色卡' : `${material.entries?.length || 0} 条世界书条目`}</Badge>{referenceCount > 0 && <Badge variant="outline" className="gap-1 rounded-full text-[11px]"><Link2 className="size-3" />被 {referenceCount} 个剧本引用</Badge>}{material.owner_username && <Badge variant="outline" className="rounded-full text-[11px]">{material.owner_username}</Badge>}</div></div></div></Card>
 }
 
 function materialValue(value: unknown): string {
@@ -513,5 +557,5 @@ function CardAvatarField({ url, name, persona, personality, onChange }: { url: s
 function EntryEditor({ entry, onUpdate, onDelete }: { entry: WorldbookEntry; onUpdate: (entry: WorldbookEntry, changes: Partial<WorldbookEntry>) => Promise<void>; onDelete: (entry: WorldbookEntry) => Promise<void> }) {
   const [draft, setDraft] = useState(entry)
   useEffect(() => setDraft(entry), [entry])
-  return <div className="rounded-xl border border-border p-3"><div className="flex gap-2"><Input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} onBlur={() => void onUpdate(entry, { title: draft.title })} /><Button variant="ghost" size="icon" className="shrink-0 text-destructive" onClick={() => void onDelete(entry)} aria-label="删除条目"><X /></Button></div><Input className="mt-2" value={draft.keywords.join('、')} placeholder="关键词，用顿号或逗号分隔" onChange={(event) => setDraft({ ...draft, keywords: event.target.value.split(/[、,，]/).map((item) => item.trim()).filter(Boolean) })} onBlur={() => void onUpdate(entry, { keywords: draft.keywords })} /><Textarea className="mt-2" rows={3} value={draft.content} placeholder="条目内容" onChange={(event) => setDraft({ ...draft, content: event.target.value })} onBlur={() => void onUpdate(entry, { content: draft.content })} /><div className="mt-2 flex items-center justify-between text-sm"><label className="flex items-center gap-2"><Switch checked={draft.enabled} onCheckedChange={(enabled) => { setDraft({ ...draft, enabled }); void onUpdate(entry, { enabled }) }} />启用</label><label className="flex items-center gap-2">优先级 <Input className="h-8 w-16" type="number" value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: Number(event.target.value) })} onBlur={() => void onUpdate(entry, { priority: draft.priority })} /></label></div></div>
+  return <div className="rounded-xl border border-border p-3"><div className="flex gap-2"><Input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} onBlur={() => void onUpdate(entry, { title: draft.title })} /><Button variant="ghost" size="icon" className="shrink-0 text-destructive" onClick={() => void onDelete(entry)} aria-label="删除条目"><X /></Button></div><Input className="mt-2" value={draft.keywords.join('、')} placeholder="关键词，用顿号或逗号分隔" onChange={(event) => setDraft({ ...draft, keywords: event.target.value.split(/[、,，]/).map((item) => item.trim()).filter(Boolean) })} onBlur={() => void onUpdate(entry, { keywords: draft.keywords })} /><Textarea className="mt-2" rows={3} value={draft.content} placeholder="条目内容" onChange={(event) => setDraft({ ...draft, content: event.target.value })} onBlur={() => void onUpdate(entry, { content: draft.content })} /><div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-sm"><label className="flex items-center gap-2"><Switch checked={draft.enabled} onCheckedChange={(enabled) => { setDraft({ ...draft, enabled }); void onUpdate(entry, { enabled }) }} />启用</label><label className="flex items-center gap-2"><Switch checked={Boolean(draft.constant)} onCheckedChange={(constant) => { setDraft({ ...draft, constant }); void onUpdate(entry, { constant }) }} />恒定注入</label><label className="flex items-center gap-2">优先级 <Input className="h-8 w-16" type="number" value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: Number(event.target.value) })} onBlur={() => void onUpdate(entry, { priority: draft.priority })} /></label></div></div>
 }

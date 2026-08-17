@@ -1,12 +1,22 @@
 # -*- coding: utf-8 -*-
 """角色卡 CRUD 接口。"""
 
+import json
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 
 from ..repository import cards as card_repository
 from ..auth.dependencies import optional_user, require_user
 from ..schemas import CardCreate, CardImageSearch, CardUpdate
 from ..services.image_search import ImageSearchError, search_character_images
+from ..services.image_uploads import UPLOAD_DIR
+from ..services.sillytavern import (
+    TRANSPARENT_PNG,
+    embed_card_document_in_png,
+    export_card_document,
+)
 from ._error_helpers import (
     _raise_no_update_fields,
     _raise_not_found,
@@ -21,6 +31,22 @@ def _get_card_or_404(card_id, viewer=None):
     if card is None:
         _raise_not_found("角色卡不存在")
     return card
+
+
+def _owned_avatar_png(card, user_id: int) -> bytes:
+    """Use a locally owned avatar for PNG export, otherwise emit a transparent cover."""
+    url = card.get("avatar_url")
+    prefix = f"/uploads/{int(user_id)}/"
+    if not isinstance(url, str) or not url.startswith(prefix):
+        return TRANSPARENT_PNG
+    filename = url.removeprefix(prefix)
+    if not filename or Path(filename).name != filename:
+        return TRANSPARENT_PNG
+    candidate = UPLOAD_DIR / str(int(user_id)) / filename
+    try:
+        return candidate.read_bytes()
+    except OSError:
+        return TRANSPARENT_PNG
 
 
 @router.get("", summary="角色卡列表")
@@ -76,6 +102,30 @@ def fill_missing_card_images(user=Depends(require_user)):
         card_repository.update_card(card["id"], {"avatar_url": image_url}, owner_user_id=user.id)
         updated.append({"id": card["id"], "name": card["name"], "image_url": image_url})
     return {"updated": updated, "failed": failed}
+
+
+@router.get("/{card_id}/exports/sillytavern-v3", summary="导出 SillyTavern V3 角色卡")
+def export_sillytavern_card(
+    card_id: int,
+    format: str = Query("json", pattern="^(json|png)$"),
+    user=Depends(require_user),
+):
+    card = _get_card_or_404(card_id, user)
+    if not card["can_edit"]:
+        raise HTTPException(403, {"code": "forbidden", "message": "无权导出该角色卡"})
+    document = export_card_document(card)
+    if format == "png":
+        content = embed_card_document_in_png(_owned_avatar_png(card, user.id), document)
+        return Response(
+            content=content,
+            media_type="image/png",
+            headers={"Content-Disposition": "attachment; filename=character-card.png"},
+        )
+    return Response(
+        content=json.dumps(document, ensure_ascii=False, indent=2).encode("utf-8"),
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=character-card.json"},
+    )
 
 
 @router.get("/{card_id}", summary="角色卡详情")

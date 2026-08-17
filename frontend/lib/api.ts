@@ -105,6 +105,7 @@ export type RoleCard = {
   initial_state: Record<string, unknown>
   character_attributes: Record<string, unknown>
   source: string
+  interop_data?: Record<string, unknown>
   owner_username: string
   can_edit: boolean
   created_at: string
@@ -138,6 +139,10 @@ export type WorldbookEntry = {
   content: string
   priority: number
   enabled: boolean
+  constant?: boolean
+  parent_entry_id?: number | null
+  sort_order?: number
+  interop_data?: Record<string, unknown>
   can_edit: boolean
 }
 
@@ -145,6 +150,7 @@ export type Worldbook = {
   id: number
   title: string
   description: string
+  interop_data?: Record<string, unknown>
   owner_username: string
   can_edit: boolean
   created_at: string
@@ -316,6 +322,18 @@ export type UploadedImage = {
   url: string
 }
 
+export type SillyTavernCardImport = {
+  card: RoleCard
+  worldbook: Worldbook | null
+  work: Work
+  warnings: string[]
+}
+
+export type SillyTavernWorldbookImport = {
+  worldbook: Worldbook
+  warnings: string[]
+}
+
 const unsafeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 let csrfToken: string | null = null
 
@@ -421,6 +439,21 @@ async function requestImage(path: string, body: unknown): Promise<Blob> {
     return requestImage(path, body)
   }
   throw error
+}
+
+async function requestFile(path: string): Promise<Blob> {
+  let response: Response
+  try {
+    response = await fetch(path, {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/octet-stream,application/json' },
+    })
+  } catch {
+    throw new ApiError('无法连接到服务', { code: 'network_error' })
+  }
+  if (response.ok) return response.blob()
+  throw toApiError(await parseBody(response), response.status)
 }
 
 async function requestStream(path: string, body: unknown) {
@@ -563,12 +596,24 @@ export const api = {
   searchCardImages: (name: string) => request<OnlineImageSearch>('/api/cards/image-candidates', { method: 'POST', body: { name } }),
   fillMissingCardImages: () => request<MissingCardImageFill>('/api/cards/fill-missing-images', { method: 'POST' }),
   importCardText: (text: string) => request<{ card: RoleCard; worldbook: Worldbook; work: Work }>('/api/imports/card-text', { method: 'POST', body: { text } }),
+  importSillyTavernCard: (file: File) => request<SillyTavernCardImport>('/api/imports/sillytavern-card', {
+    method: 'POST',
+    body: file,
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+  }),
+  importSillyTavernWorldbook: (file: File) => request<SillyTavernWorldbookImport>('/api/imports/sillytavern-worldbook', {
+    method: 'POST',
+    body: file,
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+  }),
+  exportSillyTavernCard: (id: number, format: 'json' | 'png') => requestFile(`/api/cards/${id}/exports/sillytavern-v3?format=${format}`),
 
   listWorldbooks: () => listAll<Worldbook>('/api/worldbooks'),
   getWorldbook: (id: number) => request<Worldbook>(`/api/worldbooks/${id}`),
   createWorldbook: (payload: { title: string; description?: string }) => request<Worldbook>('/api/worldbooks', { method: 'POST', body: payload }),
   updateWorldbook: (id: number, payload: Partial<Worldbook>) => request<Worldbook>(`/api/worldbooks/${id}`, { method: 'PUT', body: payload }),
   deleteWorldbook: (id: number) => request<null>(`/api/worldbooks/${id}`, { method: 'DELETE' }),
+  exportSillyTavernWorldbook: (id: number) => requestFile(`/api/worldbooks/${id}/exports/sillytavern`),
   createWorldbookEntry: (worldbookId: number, payload: Partial<WorldbookEntry> & { title: string }) => request<WorldbookEntry>(`/api/worldbooks/${worldbookId}/entries`, { method: 'POST', body: payload }),
   updateWorldbookEntry: (worldbookId: number, entryId: number, payload: Partial<WorldbookEntry>) => request<WorldbookEntry>(`/api/worldbooks/${worldbookId}/entries/${entryId}`, { method: 'PUT', body: payload }),
   deleteWorldbookEntry: (worldbookId: number, entryId: number) => request<null>(`/api/worldbooks/${worldbookId}/entries/${entryId}`, { method: 'DELETE' }),

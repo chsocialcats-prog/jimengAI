@@ -58,6 +58,9 @@ class WorldbookEntryCreate(BaseModel):
     content: str = ""
     priority: int = 0
     enabled: bool = True
+    constant: bool = False
+    parent_entry_id: Optional[int] = None
+    sort_order: int = 0
 
 
 class WorldbookEntryUpdate(BaseModel):
@@ -66,6 +69,9 @@ class WorldbookEntryUpdate(BaseModel):
     content: Optional[str] = None
     priority: Optional[int] = None
     enabled: Optional[bool] = None
+    constant: Optional[bool] = None
+    parent_entry_id: Optional[int] = None
+    sort_order: Optional[int] = None
 
 
 class ReplyTemplate(BaseModel):

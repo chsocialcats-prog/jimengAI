@@ -16,6 +16,7 @@ def row_to_card(row, viewer_user_id=None):
     data["character_attributes"] = database.json_loads(
         data.get("character_attributes"), {}
     )
+    data["interop_data"] = database.json_loads(data.get("interop_data"), {})
     data = project_shared_resource(data, viewer_user_id)
     data["referencing_works"] = [
         dict(work) for work in list_card_references(data["id"])
@@ -77,8 +78,8 @@ def create_card(data, *, owner_user_id):
         INSERT INTO cards (
             owner_user_id, name, persona, personality, speaking_style,
             relationships, directives, initial_state, character_attributes, avatar_url,
-            source, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            source, interop_data, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             owner_user_id, data.get("name", ""),
@@ -91,6 +92,7 @@ def create_card(data, *, owner_user_id):
             database.json_dumps(data.get("character_attributes", {})),
             data.get("avatar_url", ""),
             data.get("source", "local"),
+            database.json_dumps(data.get("interop_data", {})),
             now,
             now,
         ),
@@ -109,7 +111,7 @@ def update_card(card_id, data, *, owner_user_id):
         if key in fields:
             assignments.append(f"{key} = ?")
             params.append(fields[key])
-    for key in ("relationships", "directives", "initial_state", "character_attributes"):
+    for key in ("relationships", "directives", "initial_state", "character_attributes", "interop_data"):
         if key in fields:
             assignments.append(f"{key} = ?")
             params.append(database.json_dumps(fields[key]))

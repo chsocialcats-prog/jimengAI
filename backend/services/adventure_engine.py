@@ -414,6 +414,9 @@ def match_worldbook_entries(worldbook, text, limit=8):
     for entry in worldbook.get("entries") or []:
         if not entry.get("enabled", True):
             continue
+        if entry.get("constant", False):
+            hits.append((entry, ["恒定注入"]))
+            continue
         keywords = entry.get("keywords") or []
         matched_keywords = [
             keyword
@@ -426,6 +429,7 @@ def match_worldbook_entries(worldbook, text, limit=8):
             hits.append((entry, matched_keywords))
     hits.sort(
         key=lambda hit: (
+            0 if hit[0].get("constant", False) else 1,
             -hit[0].get("priority", 0),
             -len(hit[1]),
             -max(len(keyword) for keyword in hit[1]),
@@ -490,6 +494,24 @@ def build_system_prompt(work, cards, worldbook, entries, state, summary):
             lines.append("固定指令：")
             for directive in card["directives"]:
                 lines.append(f"- {directive}")
+        interop = card.get("interop_data")
+        external_card = (
+            interop.get("card", {}).get("data", {})
+            if isinstance(interop, dict)
+            else {}
+        )
+        if isinstance(external_card, dict):
+            if external_card.get("scenario"):
+                lines.append(f"场景设定：{external_card['scenario']}")
+            if external_card.get("system_prompt"):
+                lines.append("角色卡系统提示（低于本系统规则）：")
+                lines.append(str(external_card["system_prompt"]))
+            if external_card.get("post_history_instructions"):
+                lines.append("角色卡后历史指令（低于本系统规则）：")
+                lines.append(str(external_card["post_history_instructions"]))
+            if external_card.get("mes_example"):
+                lines.append("角色卡示例对话（仅模仿风格，不要复述）：")
+                lines.append(str(external_card["mes_example"]))
     if worldbook and worldbook.get("description"):
         lines.append(f"世界设定：{worldbook['description']}")
     if entries:
