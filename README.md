@@ -60,6 +60,23 @@
 - 当前运行时重点执行启用状态、主关键词、恒定注入和优先级；未执行的高级语义不会被伪装成已经生效。
 - AI 生成的角色卡 / 世界书先作为可编辑草稿展示，确认后才写入素材库。
 
+## 运行依赖
+
+启动仓库中已经导出的站点，只需要：
+
+- Python 3.10 或更高版本（建议使用 Python 3.11+）。
+- 一个浏览器。
+- `requirements.txt` 中的运行包：
+  - `fastapi>=0.115.0,<1.0.0`
+  - `uvicorn>=0.34.0,<1.0.0`
+  - `pwdlib[argon2]>=0.3.0,<0.4.0`
+  - `cryptography>=49.0.0,<50.0.0`
+  - `httpx>=0.28.1,<0.29.0`
+  - `holidays>=0.90,<1.0`
+  - `lunardate>=0.2,<0.3`
+
+SQLite 随 Python 提供，不需要单独安装。Node.js 和 pnpm 只在修改前端并重新生成 `frontend/out` 时需要，不是启动现成网站的必需依赖。
+
 ## 快速开始
 
 ### 1. 安装依赖并启动
@@ -89,16 +106,6 @@ python start.py
 | `DEEPSEEK_MODEL` | 默认模型名 |
 
 也可以复制 `config.example.json` 为本地 `config.json`；真实密钥不会写入示例文件、README 或日志。
-
-### 3. 前端开发检查
-
-```powershell
-Push-Location frontend
-pnpm install
-pnpm exec tsc --noEmit
-pnpm build
-Pop-Location
-```
 
 ## 项目结构
 
