@@ -10,7 +10,7 @@ from .account_migration import AccountMigrationService
 from .errors import SecretKeyUnavailable
 from .passwords import hash_password, normalize_username, validate_password, verify_password_or_dummy
 from .sessions import SessionService
-from .types import PublicUser
+from .types import PublicUser, ROLE_USER
 
 
 class InvalidCredentials(Exception):
@@ -58,6 +58,17 @@ class AuthService:
         with _connection_scope(self.connection_or_factory) as connection:
             return SessionService(connection).authenticate(token)
 
+    @staticmethod
+    def _public_user(row):
+        keys = row.keys()
+        return PublicUser(
+            row["id"],
+            row["username"],
+            row["created_at"],
+            row["avatar_url"] if "avatar_url" in keys else "",
+            row["role"] if "role" in keys and row["role"] else ROLE_USER,
+        )
+
     def issue(self, user_id):
         if self.keyring is None:
             raise SecretKeyUnavailable()
@@ -96,10 +107,7 @@ class AuthService:
                 raise InvalidCredentials()
             self.rate_limiter.record_login_success(client_ip, username)
             user_row = connection.execute("SELECT * FROM users WHERE id = ?", (row["id"],)).fetchone()
-            user = PublicUser(
-                user_row["id"], user_row["username"], user_row["created_at"],
-                user_row["avatar_url"] if "avatar_url" in user_row.keys() else "",
-            )
+            user = self._public_user(user_row)
             return (user, SessionService(connection).issue(row["id"])), None
 
     def change_password(self, auth, current_password, new_password):
@@ -131,4 +139,10 @@ class AuthService:
                 (avatar_url.strip(), now, auth.user.id),
             )
             connection.commit()
-        return PublicUser(auth.user.id, auth.user.username, auth.user.created_at, avatar_url.strip())
+        return PublicUser(
+            auth.user.id,
+            auth.user.username,
+            auth.user.created_at,
+            avatar_url.strip(),
+            auth.user.role,
+        )

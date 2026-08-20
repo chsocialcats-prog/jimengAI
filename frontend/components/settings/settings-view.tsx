@@ -12,27 +12,12 @@ import { Slider } from '@/components/ui/slider'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
-import { api, type ModelProvider, type ProviderCatalogItem, type ProviderDraft, type Settings } from '@/lib/api'
+import { api, type ModelProvider, type ProviderCatalogItem, type Settings } from '@/lib/api'
 import { refreshApiStatus } from '@/lib/api-status'
+import { discoveredModelIds, emptyProviderForm, isValidProviderId, mergeDiscoveredModels, providerForm, toProviderDraft, type ProviderEditor, type ProviderForm } from '@/lib/provider-config'
 import { useSession } from '@/components/session-provider'
 
 const defaultGeneration = { temperature: 0.8, maxTokens: 4096, contextWindowTokens: 32768, compressionTriggerRatio: 0.75 }
-
-type ProviderForm = {
-  provider_id: string
-  display_name: string
-  base_url: string
-  protocol: 'openai-completions'
-  model: string
-  models: string[]
-  timeout_seconds: number
-  api_key: string
-}
-
-type ProviderEditor =
-  | { kind: 'preset'; draft: ProviderForm }
-  | { kind: 'custom'; draft: ProviderForm }
-  | { kind: 'edit'; providerId: string; draft: ProviderForm }
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value))
@@ -40,30 +25,6 @@ function clamp(value: number, minimum: number, maximum: number) {
 
 function firstSliderValue(value: number | readonly number[]) {
   return Array.isArray(value) ? value[0] || 0 : value
-}
-
-function providerForm(provider: ModelProvider | ProviderCatalogItem): ProviderForm {
-  return {
-    provider_id: provider.provider_id,
-    display_name: provider.display_name,
-    base_url: provider.base_url,
-    protocol: 'openai-completions',
-    model: provider.model,
-    models: 'models' in provider ? provider.models : [],
-    timeout_seconds: 'timeout_seconds' in provider ? provider.timeout_seconds : 60,
-    api_key: '',
-  }
-}
-
-function emptyProviderForm(): ProviderForm {
-  return { provider_id: '', display_name: '', base_url: '', protocol: 'openai-completions', model: '', models: [], timeout_seconds: 60, api_key: '' }
-}
-
-function discoveredModelIds(result: { models?: string[]; items?: Array<string | { id?: string }> }) {
-  if (Array.isArray(result.models)) return result.models.filter(Boolean)
-  return Array.isArray(result.items)
-    ? result.items.map((item) => typeof item === 'string' ? item : item.id || '').filter(Boolean)
-    : []
 }
 
 export function SettingsView() {
@@ -154,7 +115,7 @@ export function SettingsView() {
         toast.message('服务未返回可用模型，请手动添加模型 ID')
         return
       }
-      updateEditor({ models: [...new Set([...editor.draft.models, ...models])], model: editor.draft.model || models[0] })
+      updateEditor({ models: mergeDiscoveredModels(editor.draft.models, models), model: editor.draft.model || models[0] })
       toast.success(`已添加 ${models.length} 个模型`)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '获取模型失败')
@@ -170,17 +131,13 @@ export function SettingsView() {
       toast.error('请填写显示名称、API 地址和默认模型')
       return
     }
-    if (editor.kind === 'custom' && !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(draft.provider_id)) {
+    if (editor.kind === 'custom' && !isValidProviderId(draft.provider_id)) {
       toast.error('Provider ID 必须以小写字母开头，只能包含小写字母、数字和连字符')
       return
     }
     setSavingProvider(true)
     try {
-      const payload: ProviderDraft = {
-        provider_id: draft.provider_id.trim(), display_name: draft.display_name.trim(), base_url: draft.base_url.trim(),
-        protocol: 'openai-completions', model: draft.model.trim(), models: draft.models, timeout_seconds: draft.timeout_seconds,
-        ...(draft.api_key.trim() ? { api_key: draft.api_key.trim() } : {}),
-      }
+      const payload = toProviderDraft(draft)
       if (editor.kind === 'edit') {
         await api.updateProvider(editor.providerId, {
           display_name: payload.display_name, base_url: payload.base_url, protocol: payload.protocol, model: payload.model,

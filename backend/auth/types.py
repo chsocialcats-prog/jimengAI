@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 
 DEFAULT_ACCOUNT_AVATAR_URL = "/images/avatars/default-account.png"
+ROLE_USER = "user"
+ROLE_STATION_MASTER = "station_master"
 
 
 @dataclass(frozen=True)
@@ -15,6 +17,7 @@ class PublicUser:
     username: str
     created_at: str
     avatar_url: str = ""
+    role: str = ROLE_USER
 
 
 @dataclass(frozen=True)

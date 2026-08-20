@@ -5,11 +5,12 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
 
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
 from backend.auth.types import AuthContext, PublicUser
 from backend.routers import assistant_routes
-from backend.schemas import AssistantChatRequest
+from backend.schemas import AssistantChatRequest, MaterialDraftRequest
 from backend.services.user_ai_settings import EffectiveAIConfig
 
 
@@ -123,6 +124,107 @@ class AssistantRouteTests(unittest.TestCase):
             assistant_routes._normalize_messages(payload)
 
         self.assertEqual(captured.exception.status_code, 422)
+
+    def test_material_draft_uses_dedicated_prompt_and_accepts_fenced_character_json(self):
+        payload = MaterialDraftRequest(kind="character", text="顾遥是海港档案员")
+        client = SimpleNamespace(stream_chat=MagicMock(return_value=iter([
+            {"type": "delta", "content": "```json\n{"},
+            {"type": "delta", "content": '"name":"顾遥","persona":"海港档案员","personality":"谨慎","speaking_style":"短句","directives":["不替玩家决定"],"character_attributes":{"好感度":0},"relationships":{"玩家":"初识"}}\n```'},
+        ])))
+
+        with patch.object(assistant_routes, "create_client", return_value=client), patch.object(assistant_routes, "build_read_only_context") as build_context:
+            response = assistant_routes.generate_material_draft(payload, self._request(_config()), auth=_auth())
+
+        self.assertEqual(response["kind"], "character")
+        self.assertEqual(response["draft"]["name"], "顾遥")
+        self.assertEqual(response["draft"]["directives"], ["不替玩家决定"])
+        build_context.assert_not_called()
+        sent_messages = client.stream_chat.call_args.args[0]
+        self.assertEqual([message["role"] for message in sent_messages], ["system", "user"])
+        self.assertIn("角色卡草稿", sent_messages[0]["content"])
+        self.assertNotIn("站内只读资料快照", sent_messages[0]["content"])
+        self.assertIn("<source_material>", sent_messages[1]["content"])
+
+    def test_material_draft_accepts_worldbook_entries(self):
+        payload = MaterialDraftRequest(kind="worldbook", text="雾港的夜航规则")
+        client = SimpleNamespace(stream_chat=MagicMock(return_value=iter([
+            {"type": "delta", "content": '{"title":"雾港","description":"海港城市","entries":[{"title":"夜航","keywords":["夜航","船票"],"content":"夜间出航需要蓝色船票。","priority":10,"enabled":true,"constant":false}]}'},
+        ])))
+
+        with patch.object(assistant_routes, "create_client", return_value=client):
+            response = assistant_routes.generate_material_draft(payload, self._request(_config()), auth=_auth())
+
+        self.assertEqual(response["draft"]["entries"][0]["keywords"], ["夜航", "船票"])
+        self.assertEqual(response["draft"]["entries"][0]["priority"], 10)
+
+    def test_material_draft_rejects_invalid_or_empty_worldbook_output(self):
+        payload = MaterialDraftRequest(kind="worldbook", text="雾港")
+        invalid_client = SimpleNamespace(stream_chat=MagicMock(return_value=iter([
+            {"type": "delta", "content": "这不是 JSON"},
+        ])))
+        empty_client = SimpleNamespace(stream_chat=MagicMock(return_value=iter([
+            {"type": "delta", "content": '{"title":"雾港","description":"","entries":[]}'},
+        ])))
+
+        with patch.object(assistant_routes, "create_client", return_value=invalid_client):
+            with self.assertRaises(HTTPException) as invalid:
+                assistant_routes.generate_material_draft(payload, self._request(_config()), auth=_auth())
+        with patch.object(assistant_routes, "create_client", return_value=empty_client):
+            with self.assertRaises(HTTPException) as empty:
+                assistant_routes.generate_material_draft(payload, self._request(_config()), auth=_auth())
+
+        self.assertEqual((invalid.exception.status_code, invalid.exception.detail["code"]), (502, "invalid_material_response"))
+        self.assertEqual((empty.exception.status_code, empty.exception.detail["code"]), (502, "invalid_material_response"))
+
+    def test_material_draft_rejects_character_without_a_name(self):
+        payload = MaterialDraftRequest(kind="character", text="没有名字的角色资料")
+        client = SimpleNamespace(stream_chat=MagicMock(return_value=iter([
+            {"type": "delta", "content": '{"name":"","persona":"资料","personality":"","speaking_style":"","directives":[],"character_attributes":{},"relationships":{}}'},
+        ])))
+
+        with patch.object(assistant_routes, "create_client", return_value=client):
+            with self.assertRaises(HTTPException) as captured:
+                assistant_routes.generate_material_draft(payload, self._request(_config()), auth=_auth())
+
+        self.assertEqual((captured.exception.status_code, captured.exception.detail["code"]), (502, "invalid_material_response"))
+
+    def test_material_draft_requires_a_configured_real_model(self):
+        config = _config()
+        disabled = EffectiveAIConfig(
+            base_url=config.base_url,
+            model=config.model,
+            api_key="",
+            generation=config.generation,
+            timeout_seconds=config.timeout_seconds,
+            ai_enabled=False,
+        )
+        payload = MaterialDraftRequest(kind="character", text="角色资料")
+
+        with patch.object(assistant_routes, "create_client") as create_client:
+            with self.assertRaises(HTTPException) as captured:
+                assistant_routes.generate_material_draft(payload, self._request(disabled), auth=_auth())
+
+        self.assertEqual((captured.exception.status_code, captured.exception.detail["code"]), (503, "ai_not_configured"))
+        create_client.assert_not_called()
+
+    def test_material_draft_rejects_unreadable_key_before_creating_client(self):
+        payload = MaterialDraftRequest(kind="character", text="角色资料")
+
+        with patch.object(assistant_routes, "create_client") as create_client:
+            with self.assertRaises(HTTPException) as captured:
+                assistant_routes.generate_material_draft(payload, self._request(_config(unreadable=True)), auth=_auth())
+
+        self.assertEqual(captured.exception.status_code, 503)
+        self.assertEqual(captured.exception.detail["code"], "api_key_unreadable")
+        create_client.assert_not_called()
+
+    def test_material_draft_route_requires_authentication(self):
+        app = FastAPI()
+        app.include_router(assistant_routes.router)
+        with TestClient(app) as client:
+            response = client.post("/api/assistant/material-drafts", json={"kind": "character", "text": "角色资料"})
+
+        self.assertEqual(response.status_code, 401)
 
 
 if __name__ == "__main__":

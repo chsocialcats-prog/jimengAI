@@ -20,6 +20,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/c
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { api, type OnboardingField, type Work } from '@/lib/api'
+import { activationHref, isAiConfigurationReady } from '@/lib/ai-activation'
 import { refreshApiStatus } from '@/lib/api-status'
 import { useSession } from '@/components/session-provider'
 import { workCover } from '@/components/library/work-card'
@@ -92,6 +93,12 @@ export function StartAdventureDialog({
     const userId = session.user.id
     setCreating(true)
     try {
+      const settings = await api.getSettings()
+      if (!isAiConfigurationReady(settings)) {
+        close()
+        router.push(activationHref(`/work?work=${work.id}&start=1`))
+        return
+      }
       void refreshApiStatus(userId)
       const conversation = await api.createConversation(work.id, work.title)
       await api.completeOnboarding(conversation.id, values)

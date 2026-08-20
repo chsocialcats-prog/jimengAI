@@ -6,7 +6,7 @@ from __future__ import annotations
 import sqlite3
 
 
-ACCOUNT_SCHEMA_VERSION = 7
+ACCOUNT_SCHEMA_VERSION = 8
 ACCOUNT_MIGRATION_STATE_KEY = "account_migration_state"
 _VALID_MIGRATION_STATES = {"unclaimed", "needs_secret_cleanup", "complete"}
 
@@ -40,6 +40,7 @@ def _create_account_tables(connection: sqlite3.Connection) -> None:
             username_key TEXT NOT NULL,
             password_hash TEXT NOT NULL,
             is_active INTEGER NOT NULL DEFAULT 1,
+            role TEXT NOT NULL DEFAULT 'user',
             password_changed_at TEXT NOT NULL,
             avatar_url TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
@@ -105,9 +106,41 @@ def _create_account_tables(connection: sqlite3.Connection) -> None:
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS admin_audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            target_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            action TEXT NOT NULL,
+            target_type TEXT NOT NULL,
+            target_id TEXT NOT NULL DEFAULT '',
+            summary_json TEXT NOT NULL DEFAULT '{}',
+            result TEXT NOT NULL DEFAULT 'success',
+            request_ip TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_admin_audit_created_at ON admin_audit_logs(created_at DESC, id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_admin_audit_target_user ON admin_audit_logs(target_user_id, created_at DESC)",
     )
     for statement in statements:
         connection.execute(statement)
+
+
+def _add_admin_columns(connection: sqlite3.Connection) -> None:
+    _ensure_column(
+        connection,
+        "users",
+        "role",
+        "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'",
+    )
+    connection.execute(
+        "UPDATE users SET role = 'user' WHERE role IS NULL OR role NOT IN ('user', 'station_master')"
+    )
+    connection.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_single_station_master "
+        "ON users(role) WHERE role = 'station_master'"
+    )
 
 
 def _add_legacy_ownership_columns(connection: sqlite3.Connection) -> None:
@@ -202,6 +235,7 @@ def migrate_account_schema(connection: sqlite3.Connection) -> None:
     connection.execute("PRAGMA foreign_keys = ON")
     _create_account_tables(connection)
     _add_user_profile_columns(connection)
+    _add_admin_columns(connection)
     _add_daily_checkin_columns(connection)
     _add_legacy_ownership_columns(connection)
     _ensure_migration_state(connection)

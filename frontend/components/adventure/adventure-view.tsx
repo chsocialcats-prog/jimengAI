@@ -44,6 +44,7 @@ import { ModelReasoningSelector } from './model-reasoning-selector'
 import { AccountMenu } from '@/components/account-menu'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { api, streamChat, type AdventureState, type Conversation, type MemorySummary, type ModelProvider, type Snapshot, type StoryMessage } from '@/lib/api'
+import { useAiActivationGuard } from '@/components/ai-activation-guard'
 import { useSession } from '@/components/session-provider'
 import { defaultReplyLength, loadReplyLength, saveReplyLength, type ReplyLengthKey } from '@/lib/reply-length'
 import { defaultReasoningEffort, loadReasoningEffort, saveReasoningEffort, type ReasoningEffortKey } from '@/lib/reasoning-effort'
@@ -100,6 +101,7 @@ export function AdventureView() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { session } = useSession()
+  const activationGuard = useAiActivationGuard()
   const rawId = searchParams.get('conversation') || ''
   const conversationId = Number(rawId)
   const showOpening = searchParams.get('new') === '1'
@@ -377,6 +379,9 @@ export function AdventureView() {
 
   if (!session.authenticated) {
     return <AdventureEmpty title="登录后继续冒险" description="冒险会话和存档仅对当前本地账户可见。" actionHref="/login" actionLabel="前往登录" />
+  }
+  if (activationGuard.checking || activationGuard.redirecting) {
+    return <div className="flex min-h-svh items-center justify-center bg-background text-sm text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />正在检查模型连接…</div>
   }
   if (!Number.isInteger(conversationId) || conversationId <= 0) {
     return <AdventureEmpty title="请选择一个存档" description="从作品库创建新的冒险，或在存档页继续已有故事。" actionHref="/saves" actionLabel="查看我的存档" />

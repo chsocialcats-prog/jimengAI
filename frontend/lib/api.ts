@@ -21,12 +21,113 @@ export type ApiUser = {
   username: string
   avatar_url: string
   created_at: string
+  role: 'user' | 'station_master'
 }
 
 export type AuthSession = {
   authenticated: boolean
   user: ApiUser | null
   legacy_claim_pending?: boolean
+}
+
+export type AdminUser = {
+  id: number
+  username: string
+  avatar_url: string
+  created_at: string
+  updated_at: string
+  is_active: boolean
+  role: 'user' | 'station_master'
+  last_seen_at: string | null
+  counts: {
+    cards: number
+    worldbooks: number
+    works: number
+    conversations: number
+  }
+  ai: {
+    api_key_set: boolean
+    provider_count: number
+    active_provider_count: number
+    providers: Array<{
+      provider_id: string
+      display_name: string
+      base_url: string
+      protocol: string
+      model: string
+      models: string[]
+      timeout_seconds: number
+      is_active: boolean
+      configured: boolean
+    }>
+    legacy: {
+      provider_id: string
+      display_name: string
+      base_url: string
+      protocol: string
+      model: string
+      timeout_seconds: number | null
+      configured: boolean
+    } | null
+  }
+}
+
+export type AdminAuditLog = {
+  id: number
+  actor_username: string
+  target_username: string
+  action: string
+  target_type: string
+  target_id: string
+  summary: Record<string, unknown>
+  result: string
+  request_ip: string
+  created_at: string
+}
+
+export type AdminOverview = {
+  users: {
+    total: number
+    active: number
+    disabled: number
+    station_masters: number
+  }
+  resources: Record<string, number>
+  recent_audits: AdminAuditLog[]
+}
+
+export type AdminPage<T> = {
+  items: T[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export type AdminResourceKind = 'card' | 'worldbook' | 'worldbook_entry' | 'work' | 'conversation' | 'message' | 'snapshot' | 'state'
+
+export type AdminResourceListItem = {
+  id: number
+  kind: AdminResourceKind
+  owner_user_id: number | null
+  owner_username: string
+  label?: string
+  description?: string
+  preview?: string
+  status?: string
+  role?: string
+  conversation_id?: number
+  sequence?: number
+  entry_count?: number
+  created_at: string
+  updated_at: string
+  last_message_at?: string | null
+}
+
+export type AdminResource = Record<string, unknown> & {
+  id: number
+  kind: AdminResourceKind
+  owner_user_id: number | null
+  owner_username?: string
 }
 
 export type DailyCheckinStatus = {
@@ -146,6 +247,8 @@ export type WorldbookEntry = {
   can_edit: boolean
 }
 
+export type WorldbookEntryDraft = Pick<WorldbookEntry, 'title' | 'keywords' | 'content' | 'priority' | 'enabled' | 'constant'>
+
 export type Worldbook = {
   id: number
   title: string
@@ -158,6 +261,26 @@ export type Worldbook = {
   entries?: WorldbookEntry[]
   referencing_works?: Array<{ id: number; title: string }>
 }
+
+export type CharacterMaterialDraft = {
+  name: string
+  persona: string
+  personality: string
+  speaking_style: string
+  directives: string[]
+  character_attributes: Record<string, unknown>
+  relationships: Record<string, unknown>
+}
+
+export type WorldbookMaterialDraft = {
+  title: string
+  description: string
+  entries: WorldbookEntryDraft[]
+}
+
+export type MaterialDraftResponse =
+  | { kind: 'character'; draft: CharacterMaterialDraft }
+  | { kind: 'worldbook'; draft: WorldbookMaterialDraft }
 
 export type Work = {
   id: number
@@ -571,10 +694,42 @@ export const api = {
   logout: () => request<null>('/api/auth/logout', { method: 'POST' }),
   changePassword: (currentPassword: string, newPassword: string) => request<AuthSession>('/api/auth/password', { method: 'PUT', body: { current_password: currentPassword, new_password: newPassword } }),
   updateProfile: (payload: { avatar_url: string }) => request<AuthSession>('/api/auth/profile', { method: 'PUT', body: payload }),
+  getAdminOverview: () => request<AdminOverview>('/api/admin/overview'),
+  listAdminUsers: (params: { q?: string; status?: 'all' | 'active' | 'disabled'; page?: number; page_size?: number } = {}) => {
+    const query = new URLSearchParams()
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== '') query.set(key, String(value))
+    })
+    return request<AdminPage<AdminUser>>(`/api/admin/users?${query.toString()}`)
+  },
+  getAdminUser: (id: number) => request<{ user: AdminUser }>(`/api/admin/users/${id}`),
+  suspendAdminUser: (id: number) => request<{ user: AdminUser }>(`/api/admin/users/${id}/suspend`, { method: 'POST' }),
+  activateAdminUser: (id: number) => request<{ user: AdminUser }>(`/api/admin/users/${id}/activate`, { method: 'POST' }),
+  resetAdminUserPassword: (id: number, newPassword: string) => request<{ user: AdminUser }>(`/api/admin/users/${id}/reset-password`, { method: 'POST', body: { new_password: newPassword } }),
+  clearAdminUserAiSecrets: (id: number) => request<{ user: AdminUser }>(`/api/admin/users/${id}/ai/clear-secrets`, { method: 'POST' }),
+  listAdminAuditLogs: (params: { action?: string; target_user_id?: number; page?: number; page_size?: number } = {}) => {
+    const query = new URLSearchParams()
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== '') query.set(key, String(value))
+    })
+    return request<AdminPage<AdminAuditLog>>(`/api/admin/audit-logs?${query.toString()}`)
+  },
+  listAdminResources: (params: { kind: AdminResourceKind; q?: string; owner_user_id?: number; page?: number; page_size?: number }) => {
+    const query = new URLSearchParams()
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== '') query.set(key, String(value))
+    })
+    return request<AdminPage<AdminResourceListItem>>(`/api/admin/resources?${query.toString()}`)
+  },
+  getAdminResource: (kind: AdminResourceKind, id: number) => request<{ resource: AdminResource }>(`/api/admin/resources/${kind}/${id}`),
+  updateAdminResource: (kind: AdminResourceKind, id: number, payload: Record<string, unknown>) => request<{ resource: AdminResource }>(`/api/admin/resources/${kind}/${id}`, { method: 'PATCH', body: payload }),
+  deleteAdminResource: (kind: AdminResourceKind, id: number) => request<null>(`/api/admin/resources/${kind}/${id}`, { method: 'DELETE' }),
+  exportAdminResource: (kind: AdminResourceKind, id: number) => requestFile(`/api/admin/resources/${kind}/${id}/export`),
   getDailyCheckin: () => request<DailyCheckinStatus>('/api/daily-checkin'),
   getDailyCheckinCalendar: () => request<DailyCheckinCalendar>('/api/daily-checkin/calendar'),
   checkIn: () => request<DailyCheckinStatus>('/api/daily-checkin', { method: 'POST' }),
   chatWithAssistant: (messages: WebAssistantMessage[], pagePath = '') => request<{ message: string; mock: boolean }>('/api/assistant/chat', { method: 'POST', body: { messages, page_path: pagePath } }),
+  generateMaterialDraft: (kind: 'character' | 'worldbook', text: string) => request<MaterialDraftResponse>('/api/assistant/material-drafts', { method: 'POST', body: { kind, text } }),
   uploadImage: (file: File) => request<UploadedImage>('/api/uploads/images', {
     method: 'POST',
     body: file,
@@ -610,7 +765,7 @@ export const api = {
 
   listWorldbooks: () => listAll<Worldbook>('/api/worldbooks'),
   getWorldbook: (id: number) => request<Worldbook>(`/api/worldbooks/${id}`),
-  createWorldbook: (payload: { title: string; description?: string }) => request<Worldbook>('/api/worldbooks', { method: 'POST', body: payload }),
+  createWorldbook: (payload: { title: string; description?: string; entries?: WorldbookEntryDraft[] }) => request<Worldbook>('/api/worldbooks', { method: 'POST', body: payload }),
   updateWorldbook: (id: number, payload: Partial<Worldbook>) => request<Worldbook>(`/api/worldbooks/${id}`, { method: 'PUT', body: payload }),
   deleteWorldbook: (id: number) => request<null>(`/api/worldbooks/${id}`, { method: 'DELETE' }),
   exportSillyTavernWorldbook: (id: number) => requestFile(`/api/worldbooks/${id}/exports/sillytavern`),

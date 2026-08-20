@@ -8,7 +8,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
-from .types import AuthContext, IssuedSession, PublicUser
+from .types import AuthContext, IssuedSession, PublicUser, ROLE_USER
 
 _IDLE_TIMEOUT = timedelta(days=7)
 _ABSOLUTE_TIMEOUT = timedelta(days=30)
@@ -81,6 +81,7 @@ class SessionService:
                 row["username"],
                 row["user_created_at"],
                 row["avatar_url"] if "avatar_url" in row.keys() else "",
+                row["role"] if "role" in row.keys() and row["role"] else ROLE_USER,
             ),
             row["id"],
         )
