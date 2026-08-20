@@ -114,7 +114,7 @@ export function AuthView() {
         : await api.register(username.trim(), password)
       setSession(session)
       toast.success(mode === 'login' ? '欢迎回来' : '账户已创建')
-      router.push('/')
+      router.replace(mode === 'register' ? '/activate-api' : '/')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '认证失败')
     } finally {

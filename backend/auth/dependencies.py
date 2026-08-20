@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Request
 
+from .types import ROLE_STATION_MASTER
+
 
 def optional_auth(request: Request):
     if hasattr(request.state, "auth"):
@@ -29,6 +31,20 @@ def optional_user(request: Request):
 
 def require_user(request: Request):
     return require_auth(request).user
+
+
+def require_station_master(request: Request):
+    """Require the authenticated account to be the single station master."""
+    auth = require_auth(request)
+    if auth.user.role != ROLE_STATION_MASTER:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "station_master_required",
+                "message": "需要站长权限",
+            },
+        )
+    return auth.user
 
 
 def require_conversation_owner(conversation_id, auth, repository):

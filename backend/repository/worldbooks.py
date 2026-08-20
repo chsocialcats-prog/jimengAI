@@ -65,17 +65,22 @@ def get_worldbook(worldbook_id, *, viewer_user_id=None):
     return data
 
 
-def create_worldbook(data, *, owner_user_id):
-    """新增世界书。"""
+def create_worldbook(data, *, owner_user_id, connect_fn=database.connect):
+    """新增世界书及其初始条目。"""
     now = database.now_str()
-    worldbook_id = database.execute(
-        "INSERT INTO worldbooks (owner_user_id, title, description, interop_data, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (
-            owner_user_id, data.get("title", ""), data.get("description", ""),
-            database.json_dumps(data.get("interop_data", {})), now, now,
-        ),
-    )
+    with closing(connect_fn()) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        worldbook_id = connection.execute(
+            "INSERT INTO worldbooks (owner_user_id, title, description, interop_data, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                owner_user_id, data.get("title", ""), data.get("description", ""),
+                database.json_dumps(data.get("interop_data", {})), now, now,
+            ),
+        ).lastrowid
+        for entry in data.get("entries", []):
+            _insert_worldbook_entry_in_connection(connection, worldbook_id, entry, now=now)
+        connection.commit()
     return get_worldbook(worldbook_id, viewer_user_id=owner_user_id)
 
 

@@ -31,6 +31,7 @@ from .auth.legacy_config import warn_if_environment_legacy_key
 from .config import AUTH_KEY_PATH, CONFIG_PATH
 from .database import connect, init_db
 from .routers import (
+    admin_routes,
     cards_routes,
     assistant_routes,
     chat_routes,
@@ -44,6 +45,8 @@ from .routers import (
     worldbooks_routes,
 )
 from .services.image_uploads import UPLOAD_DIR
+from .services.admin_service import AdminService
+from .services.admin_resources import AdminResourceService
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 FRONTEND_SOURCE_DIR = PROJECT_DIR / "frontend"
@@ -74,6 +77,8 @@ async def lifespan(app: FastAPI):
     warn_if_environment_legacy_key(config_path=CONFIG_PATH, environ=os.environ)
     app.state.runtime_settings = RuntimeSettings.from_environ()
     app.state.auth_service = AuthService(connect, keyring, rate_limiter=AuthRateLimiter())
+    app.state.admin_service = AdminService(connect)
+    app.state.admin_resource_service = AdminResourceService(connect)
     app.state.stop_events = {}
     yield
 
@@ -128,6 +133,7 @@ def health_check():
 
 for router in (
     auth_routes.router,
+    admin_routes.router,
     settings_routes.router,
     daily_checkin_routes.router,
     assistant_routes.router,

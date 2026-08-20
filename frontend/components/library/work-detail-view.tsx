@@ -29,6 +29,10 @@ export function WorkDetailView() {
   const [startOpen, setStartOpen] = useState(false)
 
   useEffect(() => {
+    if (work && searchParams.get('start') === '1') setStartOpen(true)
+  }, [searchParams, work])
+
+  useEffect(() => {
     if (!Number.isInteger(workId) || workId <= 0) {
       setLoading(false)
       setError('作品链接无效。')

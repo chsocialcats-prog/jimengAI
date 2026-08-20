@@ -20,6 +20,7 @@ def _public_user(user):
         "username": user.username,
         "created_at": user.created_at,
         "avatar_url": user.avatar_url,
+        "role": user.role,
     }
 
 

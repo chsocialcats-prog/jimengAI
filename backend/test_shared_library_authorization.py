@@ -137,6 +137,41 @@ class SharedLibraryAuthorizationTests(IsolatedDatabaseTestCase):
         self.assertFalse(legacy.json()["can_edit"])
         self.assertEqual(self.client.delete(f"/api/cards/{legacy_id}").status_code, 403)
 
+    def test_owner_can_create_worldbook_with_initial_entries(self):
+        self.as_user(self.alice)
+
+        response = self.client.post(
+            "/api/worldbooks",
+            json={
+                "title": "Alice 的世界",
+                "description": "初始条目应原子保存",
+                "entries": [
+                    {
+                        "title": "恒定规则",
+                        "keywords": ["规则"],
+                        "content": "始终生效。",
+                        "priority": 5,
+                        "enabled": True,
+                        "constant": True,
+                    },
+                    {
+                        "title": "地点",
+                        "keywords": ["图书馆"],
+                        "content": "一座安静的图书馆。",
+                        "priority": 1,
+                        "enabled": False,
+                    },
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        worldbook = response.json()
+        self.assertEqual(worldbook["title"], "Alice 的世界")
+        self.assertEqual(len(worldbook["entries"]), 2)
+        self.assertTrue(worldbook["entries"][0]["constant"])
+        self.assertFalse(worldbook["entries"][1]["enabled"])
+
     def test_public_cross_owner_references_and_bundle_failure_are_atomic(self):
         card = cards.create_card({"name": "Bob 的卡"}, owner_user_id=self.bob["id"])
         worldbook = worldbooks.create_worldbook({"title": "Bob 世界"}, owner_user_id=self.bob["id"])

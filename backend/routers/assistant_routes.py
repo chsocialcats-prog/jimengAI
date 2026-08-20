@@ -11,8 +11,13 @@ from ..ai.deepseek_client import DeepSeekError, create_client
 from ..ai.request_policy import AIRequestPolicyError
 from ..auth.dependencies import require_auth
 from ..auth.types import AuthContext
-from ..schemas import AssistantChatRequest
+from ..schemas import AssistantChatRequest, MaterialDraftRequest
 from ..services.assistant_context import build_read_only_context
+from ..services.material_drafts import (
+    MaterialDraftError,
+    build_material_messages,
+    parse_material_draft,
+)
 from .settings_routes import _service as _get_user_ai_settings_service
 
 
@@ -199,3 +204,41 @@ def chat_with_assistant(
     if not message:
         raise HTTPException(status_code=502, detail={"code": "empty_response", "message": "助手没有返回可显示的内容"})
     return {"message": message, "mock": not config.ai_enabled}
+
+
+@router.post("/material-drafts", summary="生成角色卡或世界书草稿")
+def generate_material_draft(
+    payload: MaterialDraftRequest,
+    request: Request,
+    auth: AuthContext = Depends(require_auth),
+):
+    """Use the configured web-assistant model without affecting its visible history."""
+    config, request_policy = _resolve_generation_config(request, auth)
+    if not config.ai_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "ai_not_configured", "message": "请先在设置中配置并启用可用的 AI 模型"},
+        )
+    try:
+        client = create_client(config, request_policy)
+        chunks = []
+        for event in client.stream_chat(
+            build_material_messages(payload.kind, payload.text),
+            max_tokens=min(int(config.generation.get("max_tokens", 2048)), 2048),
+        ):
+            if event.get("type") == "delta":
+                chunks.append(str(event.get("content", "")))
+        message = "".join(chunks).strip()
+        if not message:
+            raise MaterialDraftError("AI 没有返回素材草稿，请重试")
+        draft = parse_material_draft(payload.kind, message)
+    except AIRequestPolicyError as exc:
+        raise HTTPException(status_code=422, detail={"code": exc.code, "message": exc.message}) from exc
+    except DeepSeekError as exc:
+        raise HTTPException(status_code=502, detail={"code": "api_error", "message": str(exc)}) from exc
+    except MaterialDraftError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "invalid_material_response", "message": str(exc)},
+        ) from exc
+    return {"kind": payload.kind, "draft": draft}

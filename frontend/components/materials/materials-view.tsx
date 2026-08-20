@@ -19,6 +19,7 @@ import {
   ExternalLink,
   Check,
   Link2,
+  CircleHelp,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -52,11 +53,14 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyContent } from '@/components/ui/empty'
 import { ImageCropDialog } from '@/components/ui/image-crop-dialog'
-import { ApiError, api, type OnlineImageCandidate, type RoleCard, type Worldbook, type WorldbookEntry } from '@/lib/api'
+import { ApiError, api, type CharacterMaterialDraft, type OnlineImageCandidate, type RoleCard, type Worldbook, type WorldbookEntry, type WorldbookEntryDraft, type WorldbookMaterialDraft } from '@/lib/api'
 import { useSession } from '@/components/session-provider'
 
 type MaterialType = 'character' | 'worldbook'
 type AnyMaterial = (RoleCard & { kind: 'character' }) | (Worldbook & { kind: 'worldbook' })
+type NewCharacterEditor = { kind: 'character'; draft?: CharacterMaterialDraft }
+type NewWorldbookEditor = { kind: 'worldbook'; draft?: WorldbookMaterialDraft }
+type MaterialEditorTarget = AnyMaterial | NewCharacterEditor | NewWorldbookEditor
 type WorkReference = { id: number; title: string }
 type AttributeRow = { key: string; value: string }
 type RelationshipRow = { target: string; description: string }
@@ -68,6 +72,7 @@ const tabs = [
 
 const blankCard = { name: '', avatarUrl: '', persona: '', personality: '', speaking_style: '', relationships: [] as RelationshipRow[], directives: '', characterAttributes: [] as AttributeRow[] }
 const blankWorldbook = { title: '', description: '' }
+const blankWorldbookEntry = (): WorldbookEntryDraft => ({ title: '新条目', keywords: [], content: '', priority: 0, enabled: true, constant: false })
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -89,11 +94,13 @@ export function MaterialsView() {
   const [detail, setDetail] = useState<AnyMaterial | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<AnyMaterial | null>(null)
   const [deleteBlock, setDeleteBlock] = useState<{ material: AnyMaterial; works: WorkReference[] } | null>(null)
-  const [editor, setEditor] = useState<AnyMaterial | { kind: MaterialType } | null>(null)
-  const [importOpen, setImportOpen] = useState(false)
-  const [importText, setImportText] = useState('')
+  const [editor, setEditor] = useState<MaterialEditorTarget | null>(null)
+  const [guideType, setGuideType] = useState<MaterialType | null>(null)
+  const [generationType, setGenerationType] = useState<MaterialType | null>(null)
+  const [generationText, setGenerationText] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [fillMissingImagesOpen, setFillMissingImagesOpen] = useState(false)
   const [fillingMissingImages, setFillingMissingImages] = useState(false)
   const importFileRef = useRef<HTMLInputElement>(null)
@@ -173,20 +180,27 @@ export function MaterialsView() {
     URL.revokeObjectURL(url)
   }
 
-  const importCard = async () => {
-    if (!importText.trim()) return
-    setSaving(true)
+  const generateDraft = async () => {
+    if (!generationType || !generationText.trim()) return
+    setGenerating(true)
     try {
-      const bundle = await api.importCardText(importText)
-      toast.success(`已导入「${bundle.card.name}」及配套作品`)
-      setImportOpen(false)
-      setImportText('')
-      await load()
+      const result = await api.generateMaterialDraft(generationType, generationText)
+      setGenerationType(null)
+      setGenerationText('')
+      if (result.kind === 'character') setEditor({ kind: 'character', draft: result.draft })
+      else setEditor({ kind: 'worldbook', draft: result.draft })
+      toast.success('AI 草稿已生成，请检查后保存')
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '导入失败')
+      toast.error(error instanceof Error ? error.message : 'AI 生成失败')
     } finally {
-      setSaving(false)
+      setGenerating(false)
     }
+  }
+
+  const closeGeneration = () => {
+    if (generating) return
+    setGenerationType(null)
+    setGenerationText('')
   }
 
   const importCardJson = async (file: File) => {
@@ -267,25 +281,97 @@ export function MaterialsView() {
         <InputGroup className="rounded-full bg-card sm:max-w-xs"><InputGroupAddon><Search className="size-4 text-muted-foreground" /></InputGroupAddon><InputGroupInput placeholder={`搜索${activeTab.label}…`} value={query} onChange={(event) => setQuery(event.target.value)} /></InputGroup>
         <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
           <input ref={sillyTavernImportFileRef} type="file" accept="application/json,.json,image/png,.png" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importSillyTavern(file) }} />
-          {tab === 'character' && <><input ref={importFileRef} type="file" accept="application/json,.json" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importCardJson(file) }} /><Button variant="outline" className="rounded-full" disabled={!canWrite || missingAvatarCount === 0} onClick={() => setFillMissingImagesOpen(true)}><ImagePlus data-icon="inline-start" />补全配图 {missingAvatarCount > 0 ? `(${missingAvatarCount})` : ''}</Button><Button variant="outline" className="rounded-full" disabled={!canWrite} onClick={() => setImportOpen(true)}><Upload data-icon="inline-start" />导入文本</Button><Button variant="outline" className="rounded-full" disabled={!canWrite} onClick={() => importFileRef.current?.click()}><Upload data-icon="inline-start" />导入 JSON</Button></>}
+          {tab === 'character' && <><input ref={importFileRef} type="file" accept="application/json,.json" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importCardJson(file) }} /><Button variant="outline" className="rounded-full" disabled={!canWrite || missingAvatarCount === 0} onClick={() => setFillMissingImagesOpen(true)}><ImagePlus data-icon="inline-start" />补全配图 {missingAvatarCount > 0 ? `(${missingAvatarCount})` : ''}</Button><Button variant="outline" className="rounded-full" disabled={!canWrite} onClick={() => importFileRef.current?.click()}><Upload data-icon="inline-start" />导入 JSON</Button></>}
+          <Button variant="outline" className="rounded-full" disabled={!canWrite} onClick={() => setGenerationType(tab)}><Sparkles data-icon="inline-start" />AI 生成{tab === 'character' ? '角色卡' : '世界书'}</Button>
+          <Button variant="outline" className="rounded-full" onClick={() => setGuideType(tab)}><CircleHelp data-icon="inline-start" />使用说明</Button>
           <Button variant="outline" className="rounded-full" disabled={!canWrite} onClick={() => sillyTavernImportFileRef.current?.click()}><Upload data-icon="inline-start" />导入酒馆{tab === 'character' ? '卡' : '书'}</Button>
           <Button variant="outline" className="rounded-full" onClick={exportItems} disabled={list.length === 0}><Download data-icon="inline-start" />导出</Button>
-          <Button className="rounded-full" disabled={!canWrite} onClick={() => setEditor({ kind: tab })}><Plus data-icon="inline-start" />新建</Button>
+          <Button className="rounded-full" disabled={!canWrite} onClick={() => setEditor(tab === 'character' ? { kind: 'character' } : { kind: 'worldbook' })}><Plus data-icon="inline-start" />新建</Button>
         </div>
       </div>
 
-      {loading ? <div className="mt-16 flex justify-center text-sm text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />正在读取素材…</div> : list.length === 0 ? <Empty className="mt-16"><EmptyHeader><EmptyMedia variant="icon"><Sparkles /></EmptyMedia><EmptyTitle>没有找到{activeTab.label}</EmptyTitle><EmptyDescription>{canWrite ? '换个关键词，或新建一个吧。' : '登录后可以创建和管理自己的素材。'}</EmptyDescription></EmptyHeader><EmptyContent>{canWrite && <Button className="rounded-full" onClick={() => setEditor({ kind: tab })}><Plus data-icon="inline-start" />新建{activeTab.label}</Button>}</EmptyContent></Empty> : <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">{list.map((material) => <MaterialCard key={`${material.kind}-${material.id}`} material={material} onOpen={() => setDetail(material)} onEdit={() => setEditor(material)} onDelete={() => setDeleteTarget(material)} onExport={(format) => void exportSillyTavern(material, format)} />)}</div>}
+      {loading ? <div className="mt-16 flex justify-center text-sm text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />正在读取素材…</div> : list.length === 0 ? <Empty className="mt-16"><EmptyHeader><EmptyMedia variant="icon"><Sparkles /></EmptyMedia><EmptyTitle>没有找到{activeTab.label}</EmptyTitle><EmptyDescription>{canWrite ? '换个关键词，或新建一个吧。' : '登录后可以创建和管理自己的素材。'}</EmptyDescription></EmptyHeader><EmptyContent>{canWrite && <Button className="rounded-full" onClick={() => setEditor(tab === 'character' ? { kind: 'character' } : { kind: 'worldbook' })}><Plus data-icon="inline-start" />新建{activeTab.label}</Button>}</EmptyContent></Empty> : <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">{list.map((material) => <MaterialCard key={`${material.kind}-${material.id}`} material={material} onOpen={() => setDetail(material)} onEdit={() => setEditor(material)} onDelete={() => setDeleteTarget(material)} onExport={(format) => void exportSillyTavern(material, format)} />)}</div>}
 
       <MaterialDetailSheet material={detail} onOpenChange={(open) => !open && setDetail(null)} />
       <MaterialEditor editor={editor} onOpenChange={(open) => !open && setEditor(null)} onSaved={async () => { setEditor(null); await load() }} />
+      <MaterialGuideDialog type={guideType} onOpenChange={(open) => !open && setGuideType(null)} />
 
-      <Dialog open={importOpen} onOpenChange={setImportOpen}><DialogContent><DialogHeader><DialogTitle>导入文本角色卡</DialogTitle><DialogDescription>粘贴角色卡原文。系统会解析并创建角色卡、配套世界书和一部作品。</DialogDescription></DialogHeader><Textarea value={importText} onChange={(event) => setImportText(event.target.value)} rows={10} placeholder="粘贴角色卡文本…" /><DialogFooter><Button variant="ghost" onClick={() => setImportOpen(false)}>取消</Button><Button onClick={() => void importCard()} disabled={saving || !importText.trim()}>{saving ? '正在导入…' : '导入并创建作品'}</Button></DialogFooter></DialogContent></Dialog>
+      <MaterialGenerationDialog type={generationType} value={generationText} generating={generating} onChange={setGenerationText} onOpenChange={(open) => { if (!open) closeGeneration() }} onGenerate={() => void generateDraft()} />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>确认删除「{deleteTarget?.kind === 'character' ? deleteTarget.name : deleteTarget?.title}」？</AlertDialogTitle><AlertDialogDescription>若有剧本正在关联此素材，系统会阻止删除并列出具体剧本。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>取消</AlertDialogCancel><AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" onClick={() => void handleDelete()}>删除</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
       <AlertDialog open={fillMissingImagesOpen} onOpenChange={setFillMissingImagesOpen}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>为 {missingAvatarCount} 个角色补全配图？</AlertDialogTitle><AlertDialogDescription>系统会通过百炼文搜图为当前账户未配图的角色选择首个 HTTPS 搜索结果，并写入角色卡头像。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={fillingMissingImages}>取消</AlertDialogCancel><AlertDialogAction disabled={fillingMissingImages} onClick={() => void fillMissingImages()}>{fillingMissingImages ? '正在搜索图片…' : '开始补全'}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
       <AlertDialog open={!!deleteBlock} onOpenChange={(open) => !open && setDeleteBlock(null)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>无法删除「{deleteBlock?.material.kind === 'character' ? deleteBlock.material.name : deleteBlock?.material.title}」</AlertDialogTitle><AlertDialogDescription>请先在以下剧本中移除该{deleteBlock?.material.kind === 'character' ? '角色卡' : '世界书'}引用，再删除素材。</AlertDialogDescription></AlertDialogHeader><div className="max-h-52 overflow-y-auto rounded-lg border border-border bg-muted/40 p-2" role="list">{deleteBlock?.works.map((work) => <div key={work.id} className="flex items-center gap-2 px-2 py-1.5 text-sm" role="listitem"><Link2 className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate">{work.title}</span></div>)}</div><AlertDialogFooter><AlertDialogCancel>知道了</AlertDialogCancel></AlertDialogFooter></AlertDialogContent></AlertDialog>
     </div>
   )
+}
+
+function MaterialGenerationDialog({ type, value, generating, onChange, onOpenChange, onGenerate }: { type: MaterialType | null; value: string; generating: boolean; onChange: (value: string) => void; onOpenChange: (open: boolean) => void; onGenerate: () => void }) {
+  const isCharacter = type === 'character'
+  const title = isCharacter ? 'AI 生成角色卡' : 'AI 生成世界书'
+  const description = isCharacter
+    ? '粘贴人物小传、设定片段或零散想法。AI 会整理成可编辑的角色卡草稿。'
+    : '粘贴世界观、地点规则、组织资料或设定片段。AI 会整理成含条目的世界书草稿。'
+  const placeholder = isCharacter
+    ? '例如：沈砚是旧城区的钟表匠，寡言但观察细致……'
+    : '例如：雾港终年被海雾笼罩，夜间出航必须持有蓝色船票……'
+
+  return <Dialog open={type !== null} onOpenChange={onOpenChange}><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><Sparkles className="size-5 text-primary" />{title}</DialogTitle><DialogDescription>{description}生成结果不会立即保存，下一步可继续修改。</DialogDescription></DialogHeader><Textarea value={value} onChange={(event) => onChange(event.target.value)} rows={12} maxLength={12000} placeholder={placeholder} disabled={generating} /><p className="text-right text-xs text-muted-foreground">{value.length}/12000</p><DialogFooter><Button variant="ghost" onClick={() => onOpenChange(false)} disabled={generating}>取消</Button><Button onClick={onGenerate} disabled={generating || !value.trim()}><Sparkles data-icon="inline-start" className={generating ? 'animate-pulse' : undefined} />{generating ? '正在生成…' : '生成草稿'}</Button></DialogFooter></DialogContent></Dialog>
+}
+
+function MaterialGuideDialog({ type, onOpenChange }: { type: MaterialType | null; onOpenChange: (open: boolean) => void }) {
+  const isCharacter = type === 'character'
+  const title = isCharacter ? '角色卡使用说明' : '世界书使用说明'
+  const description = isCharacter ? '角色卡用于沉淀角色设定，可在多个作品中重复关联。' : '世界书用于管理会随剧情注入的设定、规则与地点信息。'
+  useEffect(() => {
+    if (!type) return
+    let nextFrame: number | undefined
+    const resetScroll = () => {
+      const dialog = Array.from(document.querySelectorAll<HTMLElement>('[data-slot="dialog-content"]'))
+        .find((element) => element.offsetParent !== null)
+      if (dialog) dialog.scrollTop = 0
+    }
+    const frame = window.requestAnimationFrame(() => {
+      resetScroll()
+      nextFrame = window.requestAnimationFrame(resetScroll)
+    })
+    return () => {
+      window.cancelAnimationFrame(frame)
+      if (nextFrame !== undefined) window.cancelAnimationFrame(nextFrame)
+    }
+  }, [type])
+  const characterJson = `{
+  "name": "林澈",
+  "persona": "旧书店店主，熟悉城中秘闻。",
+  "personality": "克制、好奇、说话直接",
+  "speaking_style": "短句，偶尔引用古籍",
+  "directives": ["不替玩家作决定"],
+  "character_attributes": { "好感度": 0 },
+  "relationships": { "玩家": "初次见面" }
+}`
+  const worldbookJson = `{
+  "name": "雾港设定",
+  "description": "一座被海雾包围的港城",
+  "entries": {
+    "0": {
+      "comment": "港口规则",
+      "keys": ["港口", "船票"],
+      "content": "夜间出航必须持有蓝色船票。",
+      "enabled": true,
+      "constant": false,
+      "insertion_order": 10
+    }
+  }
+}`
+
+  return <Dialog open={type !== null} onOpenChange={onOpenChange}><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><CircleHelp className="size-5 text-primary" />{title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>{isCharacter ? <div className="grid gap-5 text-sm leading-6"><GuideSection title="从哪里开始"><p>先写一个能在故事中持续成立的角色：角色名用于识别；人设写身份、背景和当前处境；性格写稳定的行为倾向；说话风格写称呼、句式或用词习惯。</p><p>一张角色卡可在多个作品中复用。作品关联后，角色设定会在后续剧情中作为基础上下文提供给 AI。</p></GuideSection><GuideSection title="各字段怎样写"><p><strong className="font-medium text-foreground">固定指令</strong>写不可违背的边界，例如“不会替玩家作决定”或“不能透露组织身份”。</p><p><strong className="font-medium text-foreground">角色属性</strong>保存会变化或需要引用的数据，如好感度、职业、状态；<strong className="font-medium text-foreground">关系</strong>记录角色与玩家或其他人物的关系。不要把整段人物小传塞进属性，长设定应放在人设或固定指令。</p></GuideSection><GuideSection title="头像、导入与导出"><p>头像可上传本地图片或使用在线检索。导入文本会创建角色卡、配套世界书和作品；“导入 JSON”适合本项目的普通角色数据；“导入酒馆卡”只接受 SillyTavern V3 JSON 或带 chara 元数据的 PNG。</p><p>单张角色卡可导出为酒馆 JSON 或 PNG。PNG 会带有可被兼容工具读取的角色卡元数据。</p></GuideSection><GuideSection title="普通 JSON 最小示例"><p>JSON 的键和值必须使用双引号，字段之间用逗号分隔，最后一项后不能多写逗号。普通 JSON 导入支持单个对象、对象数组，或外层包含 <code>card</code> 的对象；其中 <code>name</code> 是必填字段。</p><GuideCode>{characterJson}</GuideCode></GuideSection></div> : <div className="grid gap-5 text-sm leading-6"><GuideSection title="先建立一份可维护的设定"><p>标题用于在素材库和作品编辑器中识别世界书；简介写这份设定覆盖的世界、地点或故事范围。创建时可以直接添加多个条目，后续也可以继续增删或暂时停用。</p><p>一条世界书条目只描述一件事，例如一个地点规则、组织信息或物品来历。将互不相关的事实拆分为多条，命中会更准确，也便于以后维护。</p></GuideSection><GuideSection title="关键词、内容与启用"><p><strong className="font-medium text-foreground">条目标题</strong>只用于你自己管理；<strong className="font-medium text-foreground">关键词</strong>用顿号或逗号分隔。近期剧情文本出现任意一个关键词时，条目内容就会进入生成上下文。</p><p><strong className="font-medium text-foreground">内容</strong>写 AI 需要遵循的事实、限制或描写线索。<strong className="font-medium text-foreground">启用</strong>关闭后，条目不会触发，也不会被恒定注入。</p></GuideSection><GuideSection title="恒定注入与优先级"><p><strong className="font-medium text-foreground">恒定注入</strong>不检查关键词，每一轮生成都会加入上下文。它适合世界底层规则、永久叙事视角或不可遗忘的限制；内容应短而稳定，避免放入大量背景，以免挤占对话上下文。</p><p><strong className="font-medium text-foreground">优先级</strong>只在已经命中的条目之间决定先后，数值越高越优先。它不能让没有命中关键词的普通条目强制生效。系统会先处理恒定注入，再按优先级处理命中条目；每轮最多使用 8 条。</p></GuideSection><GuideSection title="酒馆世界书 JSON"><p>“导入酒馆书”接受 SillyTavern 世界书 JSON，或含内嵌世界书的 V3 角色卡 PNG。<code>name</code>、<code>description</code> 和 <code>entries</code> 构成最小结构；条目可使用 <code>comment</code>、<code>keys</code>、<code>content</code>、<code>enabled</code>、<code>constant</code> 与 <code>insertion_order</code>。</p><GuideCode>{worldbookJson}</GuideCode></GuideSection><GuideSection title="兼容范围"><p>导入和导出会保留二级关键词、选择性注入、正则、注入位置等高级酒馆字段；当前运行时只执行启用状态、主关键词、恒定注入和优先级。将世界书关联到作品后，它才会参与该作品的剧情生成。</p></GuideSection></div>}<DialogFooter><Button variant="ghost" onClick={() => onOpenChange(false)}>关闭</Button></DialogFooter></DialogContent></Dialog>
+}
+
+function GuideSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return <section className="border-t border-border pt-4 first:border-t-0 first:pt-0"><h3 className="font-medium text-foreground">{title}</h3><div className="mt-1.5 grid gap-2 text-muted-foreground">{children}</div></section>
+}
+
+function GuideCode({ children }: { children: string }) {
+  return <pre className="overflow-x-auto rounded-lg border border-border bg-muted/40 p-3 font-mono text-xs leading-5 text-foreground"><code>{children}</code></pre>
 }
 
 function MaterialCard({ material, onOpen, onEdit, onDelete, onExport }: { material: AnyMaterial; onOpen: () => void; onEdit: () => void; onDelete: () => void; onExport: (format: 'json' | 'png') => void }) {
@@ -393,26 +479,35 @@ function relationshipRecordFromRows(rows: RelationshipRow[]): Record<string, unk
   return recordFromRows(rows.map((row) => ({ key: row.target, value: row.description })), '关系对象')
 }
 
-function MaterialEditor({ editor, onOpenChange, onSaved }: { editor: AnyMaterial | { kind: MaterialType } | null; onOpenChange: (open: boolean) => void; onSaved: () => Promise<void> }) {
+function MaterialEditor({ editor, onOpenChange, onSaved }: { editor: MaterialEditorTarget | null; onOpenChange: (open: boolean) => void; onSaved: () => Promise<void> }) {
   const isCard = editor?.kind === 'character'
   const existingCard = editor && editor.kind === 'character' && 'id' in editor ? editor : null
   const existingWorldbook = editor && editor.kind === 'worldbook' && 'id' in editor ? editor : null
+  const cardDraft = editor && editor.kind === 'character' && !('id' in editor) ? editor.draft : undefined
+  const worldbookDraft = editor && editor.kind === 'worldbook' && !('id' in editor) ? editor.draft : undefined
   const [card, setCard] = useState(blankCard)
   const [worldbook, setWorldbook] = useState(blankWorldbook)
   const [entries, setEntries] = useState<WorldbookEntry[]>([])
+  const [draftEntries, setDraftEntries] = useState<WorldbookEntryDraft[]>([])
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!editor) return
     if (existingCard) setCard({ name: existingCard.name, avatarUrl: existingCard.avatar_url || '', persona: existingCard.persona, personality: existingCard.personality, speaking_style: existingCard.speaking_style, relationships: relationshipRows(existingCard.relationships || {}), directives: (existingCard.directives || []).join('\n'), characterAttributes: recordRows(existingCard.character_attributes || {}) })
+    else if (cardDraft) setCard({ name: cardDraft.name, avatarUrl: '', persona: cardDraft.persona, personality: cardDraft.personality, speaking_style: cardDraft.speaking_style, relationships: relationshipRows(cardDraft.relationships), directives: cardDraft.directives.join('\n'), characterAttributes: recordRows(cardDraft.character_attributes) })
     else setCard(blankCard)
     if (existingWorldbook) {
       setWorldbook({ title: existingWorldbook.title, description: existingWorldbook.description })
+      setDraftEntries([])
       setLoadingDetail(true)
       void api.getWorldbook(existingWorldbook.id).then((result) => setEntries(result.entries || [])).finally(() => setLoadingDetail(false))
-    } else { setWorldbook(blankWorldbook); setEntries([]) }
-  }, [editor])
+    } else if (worldbookDraft) {
+      setWorldbook({ title: worldbookDraft.title, description: worldbookDraft.description })
+      setEntries([])
+      setDraftEntries(worldbookDraft.entries)
+    } else { setWorldbook(blankWorldbook); setEntries([]); setDraftEntries([]) }
+  }, [editor, existingCard, existingWorldbook, cardDraft, worldbookDraft])
 
   const save = async () => {
     if (!editor) return
@@ -427,9 +522,11 @@ function MaterialEditor({ editor, onOpenChange, onSaved }: { editor: AnyMaterial
         else await api.createCard(payload)
       } else {
         const payload = { title: worldbook.title.trim(), description: worldbook.description }
+        const initialEntries = draftEntries.map((entry) => ({ ...entry, title: entry.title.trim() }))
         if (!payload.title) throw new Error('世界书标题不能为空')
+        if (initialEntries.some((entry) => !entry.title)) throw new Error('世界书条目标题不能为空')
         if (existingWorldbook) await api.updateWorldbook(existingWorldbook.id, payload)
-        else await api.createWorldbook(payload)
+        else await api.createWorldbook({ ...payload, entries: initialEntries })
       }
       toast.success('素材已保存')
       await onSaved()
@@ -439,12 +536,14 @@ function MaterialEditor({ editor, onOpenChange, onSaved }: { editor: AnyMaterial
   }
 
   const addEntry = async () => {
-    if (!existingWorldbook) { toast.info('请先保存世界书，再添加条目。'); return }
+    if (!existingWorldbook) { setDraftEntries((previous) => [...previous, blankWorldbookEntry()]); return }
     try {
       const entry = await api.createWorldbookEntry(existingWorldbook.id, { title: '新条目', content: '', keywords: [], priority: 0, enabled: true })
       setEntries((previous) => [...previous, entry])
     } catch (error) { toast.error(error instanceof Error ? error.message : '创建条目失败') }
   }
+  const updateDraftEntry = (index: number, changes: Partial<WorldbookEntryDraft>) => setDraftEntries((previous) => previous.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...changes } : entry))
+  const removeDraftEntry = (index: number) => setDraftEntries((previous) => previous.filter((_, entryIndex) => entryIndex !== index))
   const updateEntry = async (entry: WorldbookEntry, changes: Partial<WorldbookEntry>) => {
     if (!existingWorldbook) return
     const next = { ...entry, ...changes }
@@ -477,7 +576,7 @@ function MaterialEditor({ editor, onOpenChange, onSaved }: { editor: AnyMaterial
       </div> : <div className="grid gap-4">
         <div><Label htmlFor="worldbook-title">标题</Label><Input id="worldbook-title" className="mt-2" value={worldbook.title} onChange={(event) => setWorldbook({ ...worldbook, title: event.target.value })} /></div>
         <div><Label htmlFor="worldbook-description">简介</Label><Textarea id="worldbook-description" className="mt-2" rows={3} value={worldbook.description} onChange={(event) => setWorldbook({ ...worldbook, description: event.target.value })} /></div>
-        {existingWorldbook && <div className="border-t pt-4"><div className="flex items-center justify-between"><Label>世界书条目</Label><Button variant="outline" size="sm" onClick={() => void addEntry()}><Plus />添加条目</Button></div>{loadingDetail ? <p className="mt-3 text-sm text-muted-foreground">正在加载条目…</p> : <div className="mt-3 grid gap-3">{entries.map((entry) => <EntryEditor key={entry.id} entry={entry} onUpdate={updateEntry} onDelete={removeEntry} />)}</div>}</div>}
+        <div className="border-t pt-4"><div className="flex items-center justify-between"><div><Label>世界书条目</Label>{!existingWorldbook && <p className="mt-1 text-xs text-muted-foreground">保存时会与世界书一同创建。</p>}</div><Button type="button" variant="outline" size="sm" onClick={() => void addEntry()}><Plus />添加条目</Button></div>{existingWorldbook && loadingDetail ? <p className="mt-3 text-sm text-muted-foreground">正在加载条目…</p> : <div className="mt-3 grid gap-3">{existingWorldbook ? entries.map((entry) => <EntryEditor key={entry.id} entry={entry} onUpdate={updateEntry} onDelete={removeEntry} />) : draftEntries.map((entry, index) => <DraftEntryEditor key={index} entry={entry} onChange={(changes) => updateDraftEntry(index, changes)} onDelete={() => removeDraftEntry(index)} />)}</div>}</div>
       </div>}
       <DialogFooter><Button variant="ghost" onClick={() => onOpenChange(false)}>取消</Button><Button onClick={() => void save()} disabled={saving}><Save data-icon="inline-start" />{saving ? '正在保存…' : '保存'}</Button></DialogFooter>
     </DialogContent>
@@ -558,4 +657,8 @@ function EntryEditor({ entry, onUpdate, onDelete }: { entry: WorldbookEntry; onU
   const [draft, setDraft] = useState(entry)
   useEffect(() => setDraft(entry), [entry])
   return <div className="rounded-xl border border-border p-3"><div className="flex gap-2"><Input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} onBlur={() => void onUpdate(entry, { title: draft.title })} /><Button variant="ghost" size="icon" className="shrink-0 text-destructive" onClick={() => void onDelete(entry)} aria-label="删除条目"><X /></Button></div><Input className="mt-2" value={draft.keywords.join('、')} placeholder="关键词，用顿号或逗号分隔" onChange={(event) => setDraft({ ...draft, keywords: event.target.value.split(/[、,，]/).map((item) => item.trim()).filter(Boolean) })} onBlur={() => void onUpdate(entry, { keywords: draft.keywords })} /><Textarea className="mt-2" rows={3} value={draft.content} placeholder="条目内容" onChange={(event) => setDraft({ ...draft, content: event.target.value })} onBlur={() => void onUpdate(entry, { content: draft.content })} /><div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-sm"><label className="flex items-center gap-2"><Switch checked={draft.enabled} onCheckedChange={(enabled) => { setDraft({ ...draft, enabled }); void onUpdate(entry, { enabled }) }} />启用</label><label className="flex items-center gap-2"><Switch checked={Boolean(draft.constant)} onCheckedChange={(constant) => { setDraft({ ...draft, constant }); void onUpdate(entry, { constant }) }} />恒定注入</label><label className="flex items-center gap-2">优先级 <Input className="h-8 w-16" type="number" value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: Number(event.target.value) })} onBlur={() => void onUpdate(entry, { priority: draft.priority })} /></label></div></div>
+}
+
+function DraftEntryEditor({ entry, onChange, onDelete }: { entry: WorldbookEntryDraft; onChange: (changes: Partial<WorldbookEntryDraft>) => void; onDelete: () => void }) {
+  return <div className="rounded-xl border border-border p-3"><div className="flex gap-2"><Input value={entry.title} onChange={(event) => onChange({ title: event.target.value })} /><Button type="button" variant="ghost" size="icon" className="shrink-0 text-destructive" onClick={onDelete} aria-label="删除条目"><X /></Button></div><Input className="mt-2" value={entry.keywords.join('、')} placeholder="关键词，用顿号或逗号分隔" onChange={(event) => onChange({ keywords: event.target.value.split(/[、,，]/).map((item) => item.trim()).filter(Boolean) })} /><Textarea className="mt-2" rows={3} value={entry.content} placeholder="条目内容" onChange={(event) => onChange({ content: event.target.value })} /><div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-sm"><label className="flex items-center gap-2"><Switch checked={entry.enabled} onCheckedChange={(enabled) => onChange({ enabled })} />启用</label><label className="flex items-center gap-2"><Switch checked={Boolean(entry.constant)} onCheckedChange={(constant) => onChange({ constant })} />恒定注入</label><label className="flex items-center gap-2">优先级 <Input className="h-8 w-16" type="number" value={entry.priority} onChange={(event) => onChange({ priority: Number(event.target.value) })} /></label></div></div>
 }

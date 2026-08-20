@@ -47,6 +47,7 @@ import {
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { api, type OnboardingField, type ReplyTemplate, type RoleCard, type Work, type Worldbook } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { useAiActivationGuard } from '@/components/ai-activation-guard'
 import { useSession } from '@/components/session-provider'
 
 const sections = [
@@ -119,6 +120,7 @@ export function EditorView() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { session } = useSession()
+  const activationGuard = useAiActivationGuard()
   const rawWorkId = searchParams.get('work')
   const workId = rawWorkId && /^\d+$/.test(rawWorkId) ? Number(rawWorkId) : null
   const [active, setActive] = useState<string>('basic')
@@ -240,6 +242,7 @@ export function EditorView() {
   }
 
   if (!session.authenticated) return <EditorEmpty title="登录后开始创作" description="创建和修改作品需要登录本地账户。" actionHref="/login" actionLabel="前往登录" />
+  if (activationGuard.checking || activationGuard.redirecting) return <div className="flex min-h-[60vh] items-center justify-center text-sm text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />正在检查模型连接…</div>
   if (loading) return <div className="flex min-h-[60vh] items-center justify-center text-sm text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />正在打开编辑器…</div>
   if (error) return <EditorEmpty title="无法打开编辑器" description={error} actionHref="/" actionLabel="返回作品库" />
   if (!editable) return <EditorEmpty title="该作品仅可浏览" description="只有作品创建者可以修改其内容。" actionHref="/" actionLabel="返回作品库" />

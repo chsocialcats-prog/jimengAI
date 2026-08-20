@@ -52,6 +52,11 @@ def create_worldbook(payload: WorldbookCreate, user=Depends(require_user)):
     data = payload.model_dump()
     if not data.get("title", "").strip():
         _raise_validation_error("世界书标题不能为空")
+    for entry in data.get("entries", []):
+        if not entry.get("title", "").strip():
+            _raise_validation_error("世界书条目标题不能为空")
+        if entry.get("parent_entry_id") is not None:
+            _raise_validation_error("新建世界书时不能指定已有父条目")
     return worldbook_repository.create_worldbook(data, owner_user_id=user.id)
 
 

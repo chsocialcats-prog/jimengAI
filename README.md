@@ -1,93 +1,145 @@
-# 织梦AI酒馆
+# 织梦 · AI 文字冒险
 
-本地优先的多账号中文 AI 文字冒险应用。后端使用 FastAPI、Uvicorn 和 SQLite，前端是静态导出的 Next.js 应用。配置 DeepSeek 兼容 API 后使用真实流式生成；未配置密钥时使用确定性的 mock 回复。
+<p align="center">
+  <strong>把角色、世界书与每一次选择，编织成会继续生长的故事。</strong><br>
+  本地优先的中文 AI 文字冒险创作与游玩平台
+</p>
 
-账号之间严格隔离会话、消息、状态、快照、分支和个人 AI 设置。角色卡、世界书和作品是可发现的公共资源，但只有所有者可以创建、修改和删除；列表和详情会返回 `owner_username` 与 `can_edit`，用于区分可读和可写权限。
+<p align="center">
+  <a href="#产品预览">产品预览</a> ·
+  <a href="#核心能力">核心能力</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#项目结构">项目结构</a>
+</p>
 
-## 当前能力
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.x-3776AB?logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/Next.js-static_export-000000?logo=nextdotjs&logoColor=white" alt="Next.js">
+  <img src="https://img.shields.io/badge/SQLite-local_first-003B57?logo=sqlite&logoColor=white" alt="SQLite">
+</p>
 
-- 作品库、作品详情和创作台
-- 有序多角色卡、角色卡独立库、世界书和关键词触发
-- 开局设定、玩家属性、回复模板和封面
-- SSE 流式对话、剧情选项、结构化状态变化和快捷指令
-- 上下文压缩、长期记忆、手动/自动存档、读档和会话分支
-- 在线 DeepSeek、后端 mock，以及前端离线兼容存储
+## 产品预览
 
-## 启动
+下面的截图来自本地运行中的真实页面，展示公开作品浏览和账户入口。未配置 AI Key 时，应用仍可使用确定性的后端 mock 回复进行本地体验。
 
-在项目根目录安装依赖并启动单个 Uvicorn 进程：
+<p align="center">
+  <img src="docs/screenshots/01-library.jpg" alt="作品库：搜索、标签筛选与作品卡片" width="49%">
+  <img src="docs/screenshots/03-login.jpg" alt="账户入口：登录与访客浏览" width="49%">
+</p>
 
-```powershell
-python -m pip install -r requirements.txt
-python start.py
+## 核心能力
+
+| 模块 | 能力 |
+| --- | --- |
+| 作品库 | 浏览作品、搜索与标签筛选、作品详情、封面、作者信息和可冒险入口 |
+| 创作台 | 组合有序多角色卡、世界书、开场文本、玩家属性、回复模板与作品设定 |
+| 角色卡 / 世界书 | 独立素材库、关键词触发、恒定注入、优先级、引用关系和可移植导入导出 |
+| 冒险引擎 | SSE 流式生成、剧情选项、结构化状态变化、快捷指令和开局设定 |
+| 存档系统 | 自动保存、手动存档、读档、会话分支、长期记忆与上下文压缩 |
+| 账户与 AI | 多账号数据隔离、账户级模型设置、API 激活检测、访客浏览和 CSRF 防护 |
+| 管理工作区 | 受控站长账户、用户状态维护、资源检索、审计信息和素材草稿审核 |
+
+## 一次冒险如何流动
+
+```text
+作品库 → 作品详情 → 开局设定 → SSE 对话
+                         ↓
+             选项 / 状态 / 世界书 / 长期记忆
+                         ↓
+                   存档 · 读档 · 分支
 ```
 
-服务地址为 `http://127.0.0.1:8000`。自动打开浏览器时使用 `python start.py`；只启动服务时使用：
+每次创建会话时，角色卡会被冻结为快照，因此后续修改素材不会悄悄改写已经开始的故事。生成内容中的可见叙事与结构化状态、选项、判定信息会分开处理，最终再持久化到当前账户。
+
+## 兼容与数据边界
+
+- 支持角色卡和世界书的普通 JSON 导入导出。
+- 支持 SillyTavern V3 角色卡 JSON、PNG 元数据和世界书字段的迁移。
+- 兼容导入会尽量保留二级关键词、选择性注入、正则和插入位置等外部字段。
+- 当前运行时重点执行启用状态、主关键词、恒定注入和优先级；未执行的高级语义不会被伪装成已经生效。
+- AI 生成的角色卡 / 世界书先作为可编辑草稿展示，确认后才写入素材库。
+
+## 运行依赖
+
+启动仓库中已经导出的站点，只需要：
+
+- Python 3.10 或更高版本（建议使用 Python 3.11+）。
+- 一个浏览器。
+- `requirements.txt` 中的运行包：
+  - `fastapi>=0.115.0,<1.0.0`
+  - `uvicorn>=0.34.0,<1.0.0`
+  - `pwdlib[argon2]>=0.3.0,<0.4.0`
+  - `cryptography>=49.0.0,<50.0.0`
+  - `httpx>=0.28.1,<0.29.0`
+  - `holidays>=0.90,<1.0`
+  - `lunardate>=0.2,<0.3`
+
+SQLite 随 Python 提供，不需要单独安装。Node.js 和 pnpm 只在修改前端并重新生成 `frontend/out` 时需要，不是启动现成网站的必需依赖。
+
+## 快速开始
+
+### 1. 安装依赖并启动
 
 ```powershell
+git clone https://github.com/chsocialcats-prog/nekodesu.git
+Set-Location nekodesu
+
+python -m pip install -r requirements.txt
 python start.py --no-browser
 ```
 
-应用依赖进程内的会话生成锁和停止事件，请不要使用 Uvicorn 多 worker 或多进程模式。
+打开 <http://127.0.0.1:8000>。想让启动器自动打开浏览器时，使用：
 
-## 本地配置
+```powershell
+python start.py
+```
 
-账号安全和运行时配置通过环境变量提供；AI 配置也可通过登录后的应用设置页提供：
+### 2. 配置 AI Provider（可选）
 
-- `NEKO_DATA_DIR`：SQLite 数据目录，默认是 `data/`
-- `NEKO_AUTH_KEYS`：Fernet 主密钥轮换列表（逗号分隔）；不要写入仓库或日志
-- `NEKO_AUTH_KEY_PATH`：主密钥文件路径，默认位于数据目录
-- `NEKO_COOKIE_SECURE`：HTTPS 部署设为 `true`；本地 HTTP 才使用 `false`
-- `NEKO_PUBLIC_ORIGIN`：浏览器实际访问的固定 origin，例如 `https://adventure.example`
-- `NEKO_TRUSTED_PROXY_CIDRS`：仅填写自有反向代理网段
-- `NEKO_AI_ALLOWED_ORIGINS`：AI provider origin 白名单
-- `NEKO_AI_HTTPS_ONLY`：生产环境建议设为 `true`
-- `DEEPSEEK_API_KEY`
-- `DEEPSEEK_BASE_URL`
-- `DEEPSEEK_MODEL`
+未配置 Key 时可以浏览公开作品，并使用后端 mock 回复完成本地联调。需要真实生成时，可在登录后的设置 / API 激活页面配置 DeepSeek 兼容服务：
 
-`config.example.json` 是可提交的配置模板。需要本地文件配置时，先复制它为 `config.json`；该文件已被 Git 忽略，且环境变量会覆盖其中的 AI 连接配置。SQLite 运行数据位于 `data/app.db`，也不应手动编辑或提交。
+| 环境变量 | 作用 |
+| --- | --- |
+| `DEEPSEEK_API_KEY` | Provider API Key |
+| `DEEPSEEK_BASE_URL` | OpenAI 兼容 API 根地址 |
+| `DEEPSEEK_MODEL` | 默认模型名 |
 
-新实例的第一个注册账号会在事务中认领旧的无主资源，并将旧配置中的明文 API key 加密迁移到该账号；清理未完成时写请求会被拒绝，恢复方式见 [`docs/deployment-account-security.md`](docs/deployment-account-security.md)。请先备份数据目录和主密钥，再做迁移或轮换。不要使用多 worker：会话生成锁和 stop 事件保存在单进程内存中。
-
-浏览器使用 HttpOnly 的 `neko_session` 会话 Cookie 和非 HttpOnly 的 `neko_csrf` 双提交 Cookie。所有写请求都必须带同源 `Origin`/`Referer` 和 `X-CSRF-Token`。局域网 HTTP 仅适合可信开发网络；它不能防止同网段窃听或会话劫持，公开部署必须使用 HTTPS、Secure Cookie 和固定 public origin。
+也可以复制 `config.example.json` 为本地 `config.json`；真实密钥不会写入示例文件、README 或日志。
 
 ## 项目结构
 
 ```text
 backend/
-├── ai/                    DeepSeek/OpenAI 兼容客户端与 mock 客户端
+├── ai/                    DeepSeek / OpenAI 兼容客户端与 mock 客户端
+├── auth/                  账户、会话、权限和 CSRF 依赖
 ├── repository/            cards、works、worldbooks、conversations、snapshots
-├── routers/               配置、资源 CRUD、导入和 SSE 聊天路由
-├── services/              冒险引擎、上下文、状态、命令和存档服务
+├── routers/               配置、资源 CRUD、管理和 SSE 聊天路由
+├── services/              冒险引擎、上下文、状态、存档、管理和素材草稿
 ├── database.py            SQLite 初始化与迁移
-├── schemas.py             API 请求模型
-└── smoke_test.py          运行中服务的后端冒烟测试
+└── schemas.py             API 请求模型
 frontend/
-├── app/                   Next 路由和全局样式
-├── components/            页面视图与通用 UI 组件
-├── lib/                   API、会话和前端状态工具
+├── app/                   Next.js 路由和全局页面入口
+├── components/            页面视图、冒险控制与通用 UI
+├── lib/                   API、会话、Provider 和激活状态工具
 ├── public/                公开静态资源
-├── out/                   由 Next 导出的运行时静态文件
-└── package.json           前端构建脚本与依赖
-插画/                      登录页插画源文件，构建时同步至前端公开资源
+└── out/                   Next.js 静态导出产物
 docs/
-├── api-contract.md        SSE 与兼容语义 notes
-├── superpowers/baselines/ 清理前行为基线
-└── archive/               历史计划、handoff 和一次性 QA 资源
+└── screenshots/           README 产品预览截图
+插画/                      登录页插画源文件，构建时同步至前端公开资源
 start.py                   Windows 启动器
 config.example.json        可安全提交的本地配置模板
 ```
 
 ## 测试
 
-完整后端测试（包含根目录启动器测试迁移后的标准发现范围）：
+完整后端测试：
 
 ```powershell
 python -m unittest discover -s backend -p 'test_*.py'
 ```
 
-前端类型检查与静态导出：
+前端类型检查和静态导出：
 
 ```powershell
 Push-Location frontend
@@ -96,10 +148,23 @@ pnpm build
 Pop-Location
 ```
 
-启动服务后可运行后端冒烟测试：
+启动服务后，可额外运行后端冒烟测试：
 
 ```powershell
 python backend/smoke_test.py
 ```
 
-当前 API 路由和 schema 以 `backend.main.app.openapi()`、`backend/schemas.py`、路由实现及测试为准；[`docs/api-contract.md`](docs/api-contract.md) 记录认证、隔离、SSE 和兼容行为，避免维护一份容易过期的完整 API 副本。
+## 运行与安全说明
+
+<details>
+<summary>展开查看本地部署注意事项</summary>
+
+- 应用故意保持单进程运行。会话生成锁和 stop 事件保存在 FastAPI 进程内存中，不要使用 Uvicorn 多 worker 或多进程模式。
+- SQLite 运行数据默认位于 `data/app.db`；不要手动编辑、提交或把它当作迁移文件。
+- `NEKO_AUTH_KEYS`、`NEKO_AUTH_KEY_PATH`、`NEKO_COOKIE_SECURE`、`NEKO_PUBLIC_ORIGIN`、`NEKO_TRUSTED_PROXY_CIDRS` 和 `NEKO_AI_HTTPS_ONLY` 用于生产环境的认证与代理边界。
+- 浏览器使用 HttpOnly 的 `neko_session` 会话 Cookie，以及非 HttpOnly 的 `neko_csrf` 双提交 Cookie。写请求需要同源 `Origin` / `Referer` 和 `X-CSRF-Token`。
+- 局域网 HTTP 只适合可信开发网络；公开部署请使用 HTTPS、Secure Cookie 和固定 public origin，并先备份数据目录与认证密钥材料。
+
+</details>
+
+当前 API 路由和 schema 以 `backend.main.app.openapi()`、`backend/schemas.py`、路由实现及测试为准；认证、隔离、SSE 与兼容语义的补充说明见 [`docs/api-contract.md`](docs/api-contract.md)。

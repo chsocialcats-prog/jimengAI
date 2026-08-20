@@ -42,16 +42,6 @@ class SearchImageFetch(BaseModel):
     url: str = Field(..., min_length=1, max_length=2_000)
 
 
-class WorldbookCreate(BaseModel):
-    title: str
-    description: str = ""
-
-
-class WorldbookUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-
-
 class WorldbookEntryCreate(BaseModel):
     title: str
     keywords: list = Field(default_factory=list)
@@ -72,6 +62,17 @@ class WorldbookEntryUpdate(BaseModel):
     constant: Optional[bool] = None
     parent_entry_id: Optional[int] = None
     sort_order: Optional[int] = None
+
+
+class WorldbookCreate(BaseModel):
+    title: str
+    description: str = ""
+    entries: list[WorldbookEntryCreate] = Field(default_factory=list)
+
+
+class WorldbookUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
 
 
 class ReplyTemplate(BaseModel):
@@ -162,6 +163,11 @@ class AssistantMessage(BaseModel):
 class AssistantChatRequest(BaseModel):
     messages: list[AssistantMessage] = Field(..., min_length=1, max_length=16)
     page_path: str = Field("", max_length=240)
+
+
+class MaterialDraftRequest(BaseModel):
+    kind: Literal["character", "worldbook"]
+    text: str = Field(..., min_length=1, max_length=12_000)
 
 
 class SnapshotCreate(BaseModel):

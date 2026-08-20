@@ -16,6 +16,7 @@ def make_connection():
         """
         CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL,
             username_key TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, is_active INTEGER NOT NULL,
+            role TEXT NOT NULL DEFAULT 'user',
             password_changed_at TEXT NOT NULL, avatar_url TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
         CREATE TABLE auth_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
             token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
@@ -126,6 +127,29 @@ class AuthRouteTests(unittest.TestCase):
         self.assertEqual(updated.status_code, 200)
         self.assertEqual(updated.json()["user"]["avatar_url"], avatar_url)
         self.assertEqual(self.client.get("/api/auth/me").json()["user"]["avatar_url"], avatar_url)
+
+    def test_auth_responses_expose_station_master_role(self):
+        registered = self.client.post(
+            "/api/auth/register",
+            json={"username": "Alice", "password": "correct horse battery"},
+            headers={"X-CSRF-Token": self.csrf(), "Origin": "http://testserver"},
+        )
+        self.assertEqual(registered.status_code, 201)
+        user_id = registered.json()["user"]["id"]
+        self.connection.execute("UPDATE users SET role = 'station_master' WHERE id = ?", (user_id,))
+        self.connection.commit()
+        self.client.post(
+            "/api/auth/logout",
+            headers={"X-CSRF-Token": self.client.cookies.get("neko_csrf"), "Origin": "http://testserver"},
+        )
+
+        logged_in = self.client.post(
+            "/api/auth/login",
+            json={"username": "Alice", "password": "correct horse battery"},
+            headers={"X-CSRF-Token": self.csrf(), "Origin": "http://testserver"},
+        )
+        self.assertEqual(logged_in.json()["user"]["role"], "station_master")
+        self.assertEqual(self.client.get("/api/auth/me").json()["user"]["role"], "station_master")
 
     def test_security_rejection_clears_invalid_session_and_is_not_cacheable(self):
         token = self.csrf()
