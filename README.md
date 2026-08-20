@@ -1,4 +1,4 @@
-# 即梦AI酒馆
+# 织梦AI酒馆
 
 本地优先的多账号中文 AI 文字冒险应用。后端使用 FastAPI、Uvicorn 和 SQLite，前端是静态导出的 Next.js 应用。配置 DeepSeek 兼容 API 后使用真实流式生成；未配置密钥时使用确定性的 mock 回复。
 
